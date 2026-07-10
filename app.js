@@ -178,7 +178,7 @@ function visitDetail(id){
 
   if(!p||!v) return '<section class="card">Visita non trovata</section>';
 
-  const examNames=(v.exams||[]).map(e=>e.exam_type).join(', ')||'Nessun esame registrato';
+  const exams=(v.exams||[]);
 
   return `<section class="card">
     <h2>${fmt(v.visit_date)} · ${esc(p.owners.surname)} – ${esc(p.name)}</h2>
@@ -196,7 +196,15 @@ function visitDetail(id){
     <p>${esc(v.clinical_exam||'—').replace(/\n/g,'<br>')}</p>
 
     <h3>Esami</h3>
-    <p>${esc(examNames)}</p>
+    ${exams.length?exams.map(e=>`
+      <div class="row" ${e.exam_type==='ECG'?`data-open-ecg="${e.id}"`:''}>
+        <div>
+          <div class="title">${esc(e.exam_type)}</div>
+          <div class="meta">${e.exam_type==='ECG'?'Apri il modulo ECG':'Modulo in preparazione'}</div>
+        </div>
+        ${e.exam_type==='ECG'?'<span>›</span>':''}
+      </div>
+    `).join(''):'<p class="meta">Nessun esame registrato</p>'}
 
     <h3>Conclusioni</h3>
     <p>${esc(v.conclusions||'—').replace(/\n/g,'<br>')}</p>
@@ -207,6 +215,66 @@ function visitDetail(id){
 
   <button class="btn" data-edit-visit="${v.id}">Modifica visita</button>
   <button class="btn secondary" data-back-patient="${p.id}">Torna al paziente</button>`;
+}
+
+function ecgView(examId){
+  const p=patients.find(p=>(p.visits||[]).some(v=>(v.exams||[]).some(e=>e.id===examId)));
+  const v=p?.visits?.find(v=>(v.exams||[]).some(e=>e.id===examId));
+  const e=v?.exams?.find(e=>e.id===examId);
+
+  if(!p||!v||!e) return '<section class="card">ECG non trovato</section>';
+
+  const steps=[
+    ['P-QRS','Relazione tra onde P e complessi QRS'],
+    ['FC','Frequenza cardiaca'],
+    ['Ritmo','Origine e regolarità'],
+    ['Onda P','Morfologia e misure'],
+    ['QRS','Morfologia, durata e ampiezza'],
+    ['PR','Intervallo PR'],
+    ['Conduzione','Disturbi della conduzione'],
+    ['Extrasistoli','Battiti ectopici'],
+    ['Onda T','Morfologia dell’onda T'],
+    ['QT','Intervallo QT'],
+    ['Asse','Asse elettrico'],
+    ['Diagnosi','Interpretazione elettrocardiografica'],
+    ['Raccomandazioni','Approfondimenti consigliati']
+  ];
+
+  return `<section class="card">
+    <div class="meta">${fmt(v.visit_date)} · ${esc(p.owners.surname)} – ${esc(p.name)}</div>
+    <h2>ECG</h2>
+    <p class="meta">Struttura iniziale del modulo di refertazione.</p>
+  </section>
+
+  <section class="card">
+    <h3>Analisi del tracciato</h3>
+    ${steps.map(([title,sub],i)=>`
+      <div class="row">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span class="chip">${i===0?'🟢':'⚪'}</span>
+          <div>
+            <div class="title">${esc(title)}</div>
+            <div class="meta">${esc(sub)}</div>
+          </div>
+        </div>
+        <span>›</span>
+      </div>
+    `).join('')}
+  </section>
+
+  <section class="card">
+    <h3>Descrizione</h3>
+    <p class="meta">Il testo verrà costruito progressivamente durante la compilazione.</p>
+    <textarea placeholder="Descrizione ECG"></textarea>
+
+    <h3>Interpretazione</h3>
+    <textarea placeholder="Diagnosi elettrocardiografica"></textarea>
+
+    <h3>Conclusioni e raccomandazioni</h3>
+    <textarea placeholder="Conclusioni e raccomandazioni"></textarea>
+  </section>
+
+  <button class="btn secondary" data-back-visit="${v.id}">Torna alla visita</button>`;
 }
 
 function draftKey(patientId){
@@ -355,6 +423,7 @@ async function render(){
   else if(route.name==='new-patient') app.innerHTML=newPatient();
   else if(route.name==='patient') app.innerHTML=patient(route.id);
   else if(route.name==='visit') app.innerHTML=visitDetail(route.id);
+  else if(route.name==='ecg') app.innerHTML=ecgView(route.id);
   else if(route.name==='edit-visit'){
     const p=patients.find(p=>(p.visits||[]).some(v=>v.id===route.id));
     const v=p?.visits?.find(v=>v.id===route.id);
@@ -384,6 +453,14 @@ function bind(){
 
   document.querySelectorAll('[data-visit]').forEach(b=>{
     b.onclick=()=>go('visit',b.dataset.visit);
+  });
+
+  document.querySelectorAll('[data-open-ecg]').forEach(b=>{
+    b.onclick=()=>go('ecg',b.dataset.openEcg);
+  });
+
+  document.querySelectorAll('[data-back-visit]').forEach(b=>{
+    b.onclick=()=>go('visit',b.dataset.backVisit);
   });
 
   document.querySelectorAll('[data-edit-visit]').forEach(b=>{
