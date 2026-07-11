@@ -250,6 +250,9 @@ function getEcgState(examId,exam=null){
       prValue:saved.prValue||'',
       wanderingDecision:saved.wanderingDecision||'',
       bav1Decision:saved.bav1Decision||'',
+      conductionMode:saved.conductionMode||'',
+      bav2Subtype:saved.bav2Subtype||'',
+      bav2Decision:saved.bav2Decision||'',
       description:exam?.description||saved.description||'',
       interpretation:exam?.interpretation||saved.interpretation||'',
       recommendations:exam?.recommendations||saved.recommendations||'',
@@ -434,6 +437,28 @@ function bav1Suggested(state){
     && state.prMode==='prolonged';
 }
 
+function bav2Suggested(state){
+  return state.pToQrs==='no'
+    && state.qrsToP==='yes';
+}
+
+function bav2SubtypeLabel(value){
+  return ({
+    mobitz1:'Mobitz I (Wenckebach)',
+    mobitz2:'Mobitz II',
+    two_to_one:'2:1',
+    high_grade:'alto grado',
+    unclassified:'non classificabile'
+  })[value]||'';
+}
+
+function conductionDot(state){
+  if(state.conductionMode==='none') return '🟢';
+  if(state.conductionMode) return '🟠';
+  if(bav2Suggested(state)) return '🟠';
+  return '⚪';
+}
+
 function decisionLabel(value){
   return ({
     confirm:'Confermo',
@@ -458,6 +483,19 @@ function buildEcgInterpretation(state){
       parts.push('Blocco atrioventricolare di I grado.');
     }else if(state.bav1Decision==='inconclusive'){
       parts.push('Intervallo PR prolungato, reperto non conclusivo per blocco atrioventricolare di I grado.');
+    }
+  }
+
+  if(bav2Suggested(state)){
+    const subtype=bav2SubtypeLabel(state.bav2Subtype);
+    if(state.bav2Decision==='confirm'){
+      parts.push(subtype
+        ? `Blocco atrioventricolare di II grado, ${subtype}.`
+        : 'Blocco atrioventricolare di II grado.');
+    }else if(state.bav2Decision==='inconclusive'){
+      parts.push(subtype
+        ? `Disturbo della conduzione atrioventricolare suggestivo ma non conclusivo per BAV di II grado, ${subtype}.`
+        : 'Disturbo della conduzione atrioventricolare suggestivo ma non conclusivo per BAV di II grado.');
     }
   }
 
@@ -501,7 +539,7 @@ function ecgView(examId){
     ['Onda P','Morfologia e misure',pWaveDot(state),'onda-p'],
     ['QRS','Morfologia, durata e ampiezza',qrsDot(state),'qrs'],
     ['PR','Intervallo PR',prDot(state),'pr'],
-    ['Conduzione','Disturbi della conduzione','⚪','conduzione'],
+    ['Conduzione','Disturbi della conduzione',conductionDot(state),'conduzione'],
     ['Extrasistoli','Battiti ectopici','⚪','extrasistoli'],
     ['Onda T','Morfologia dell’onda T','⚪','onda-t'],
     ['QT','Intervallo QT','⚪','qt'],
@@ -699,6 +737,32 @@ function ecgView(examId){
           `:''}
         </div>
       `:''}
+
+      ${state.openStep===key&&key==='conduzione'?`
+        <div class="card" style="margin:12px 0">
+          <h3>Conduzione atrioventricolare</h3>
+
+          <div class="exam-grid">
+            ${optionButton(examId,'conductionMode','none','Nessuna alterazione',state.conductionMode)}
+            ${optionButton(examId,'conductionMode','bav1','BAV I grado',state.conductionMode)}
+            ${optionButton(examId,'conductionMode','bav2','BAV II grado',state.conductionMode)}
+            ${optionButton(examId,'conductionMode','advanced','BAV avanzato',state.conductionMode)}
+            ${optionButton(examId,'conductionMode','complete','BAV completo',state.conductionMode)}
+            ${optionButton(examId,'conductionMode','other','Altro',state.conductionMode)}
+          </div>
+
+          ${(state.conductionMode==='bav2'||bav2Suggested(state))?`
+            <p><b>Tipo di BAV di II grado</b></p>
+            <div class="exam-grid">
+              ${optionButton(examId,'bav2Subtype','mobitz1','Mobitz I',state.bav2Subtype)}
+              ${optionButton(examId,'bav2Subtype','mobitz2','Mobitz II',state.bav2Subtype)}
+              ${optionButton(examId,'bav2Subtype','two_to_one','2:1',state.bav2Subtype)}
+              ${optionButton(examId,'bav2Subtype','high_grade','Alto grado',state.bav2Subtype)}
+              ${optionButton(examId,'bav2Subtype','unclassified','Non classificabile',state.bav2Subtype)}
+            </div>
+          `:''}
+        </div>
+      `:''}
     `).join('')}
   </section>
 
@@ -729,6 +793,20 @@ function ecgView(examId){
             ${optionButton(examId,'bav1Decision','confirm','Confermo',state.bav1Decision)}
             ${optionButton(examId,'bav1Decision','reject','Non confermo',state.bav1Decision)}
             ${optionButton(examId,'bav1Decision','inconclusive','Non conclusivo',state.bav1Decision)}
+          </div>
+        </div>
+      `:''}
+
+      ${bav2Suggested(state)?`
+        <div class="notice">
+          <b>Possibile BAV di II grado</b><br>
+          Non tutte le onde P sono seguite da un QRS, mentre i QRS risultano preceduti da onda P.
+          ${state.bav2Subtype?`<br>Tipo selezionato: <b>${esc(bav2SubtypeLabel(state.bav2Subtype))}</b>.`:''}
+          <p><b>Sei d’accordo con questa interpretazione?</b></p>
+          <div class="exam-grid">
+            ${optionButton(examId,'bav2Decision','confirm','Confermo',state.bav2Decision)}
+            ${optionButton(examId,'bav2Decision','reject','Non confermo',state.bav2Decision)}
+            ${optionButton(examId,'bav2Decision','inconclusive','Non conclusivo',state.bav2Decision)}
           </div>
         </div>
       `:''}
@@ -965,8 +1043,11 @@ function bind(){
       if(
         b.dataset.field==='wanderingDecision'
         || b.dataset.field==='bav1Decision'
+        || b.dataset.field==='bav2Decision'
+        || b.dataset.field==='bav2Subtype'
         || wanderingSuggested(state)
         || bav1Suggested(state)
+        || bav2Suggested(state)
       ){
         state.interpretation=buildEcgInterpretation(state);
       }
@@ -1041,7 +1122,10 @@ function bind(){
           prMode:state.prMode,
           prValue:state.prValue,
           wanderingDecision:state.wanderingDecision,
-          bav1Decision:state.bav1Decision
+          bav1Decision:state.bav1Decision,
+          conductionMode:state.conductionMode,
+          bav2Subtype:state.bav2Subtype,
+          bav2Decision:state.bav2Decision
         },
         description:state.description||null,
         interpretation:state.interpretation||null,
