@@ -378,7 +378,10 @@ function ecgView(examId){
 
   const state=getEcgState(examId,e);
   const generated=buildEcgDescription(state);
-  if(generated&&!state.description) state.description=generated;
+
+  // Se esistono dati strutturati ECG, rigenera sempre la descrizione automatica.
+  // Questo aggiorna anche i vecchi testi salvati in secondi, convertendoli in millisecondi.
+  if(generated) state.description=generated;
 
   const steps=[
     ['P-QRS','Relazione tra onde P e complessi QRS',pqrsDot(state),'pqrs'],
