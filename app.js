@@ -228,6 +228,10 @@ function getEcgState(examId,exam=null){
       heartRate:saved.heartRate||'',
       rhythmOrigin:saved.rhythmOrigin||'',
       rhythmRegularity:saved.rhythmRegularity||'',
+      pWaveMode:saved.pWaveMode||'',
+      pWaveFindings:Array.isArray(saved.pWaveFindings)?saved.pWaveFindings:[],
+      pWaveDuration:saved.pWaveDuration||'',
+      pWaveAmplitude:saved.pWaveAmplitude||'',
       description:exam?.description||saved.description||'',
       interpretation:exam?.interpretation||saved.interpretation||'',
       recommendations:exam?.recommendations||saved.recommendations||'',
@@ -292,6 +296,21 @@ function buildEcgDescription(state){
     else if(reg) parts.push(`Ritmo ${reg}.`);
   }
 
+  if(state.pWaveMode==='normal'){
+    parts.push('Onda P nei limiti della norma.');
+  }else if(state.pWaveMode==='detail'){
+    if(state.pWaveFindings.length){
+      parts.push(`Onda P ${state.pWaveFindings.map(pWaveFindingLabel).join(', ')}.`);
+    }else{
+      parts.push('Onda P da approfondire.');
+    }
+  }
+
+  const measures=[];
+  if(state.pWaveDuration) measures.push(`durata ${state.pWaveDuration} s`);
+  if(state.pWaveAmplitude) measures.push(`ampiezza ${state.pWaveAmplitude} mV`);
+  if(measures.length) parts.push(`Misure dell’onda P: ${measures.join(', ')}.`);
+
   return parts.join(' ');
 }
 
@@ -305,10 +324,37 @@ function rhythmDot(state){
   return '⚪';
 }
 
+function pWaveFindingLabel(value){
+  return ({
+    ampiezza_aumentata:'aumentata in ampiezza',
+    durata_aumentata:'aumentata in durata',
+    bifida:'bifida',
+    negativa:'negativa',
+    assente:'assente',
+    variabile:'variabile',
+    altro:'con altra alterazione'
+  })[value]||value;
+}
+
+function pWaveDot(state){
+  if(state.pWaveMode==='normal') return '🟢';
+  if(state.pWaveMode==='detail'&&state.pWaveFindings.length) return '🟠';
+  if(state.pWaveMode==='detail') return '🟠';
+  return '⚪';
+}
+
 function optionButton(examId,field,value,label,current){
   return `<button type="button"
     class="exam ${current===value?'active':''}"
     data-ecg-choice="${examId}"
+    data-field="${field}"
+    data-value="${value}">${esc(label)}</button>`;
+}
+
+function toggleButton(examId,field,value,label,current){
+  return `<button type="button"
+    class="exam ${current.includes(value)?'active':''}"
+    data-ecg-toggle="${examId}"
     data-field="${field}"
     data-value="${value}">${esc(label)}</button>`;
 }
@@ -328,7 +374,7 @@ function ecgView(examId){
     ['P-QRS','Relazione tra onde P e complessi QRS',pqrsDot(state),'pqrs'],
     ['FC','Frequenza cardiaca',fcDot(state),'fc'],
     ['Ritmo','Origine e regolarità',rhythmDot(state),'ritmo'],
-    ['Onda P','Morfologia e misure','⚪','onda-p'],
+    ['Onda P','Morfologia e misure',pWaveDot(state),'onda-p'],
     ['QRS','Morfologia, durata e ampiezza','⚪','qrs'],
     ['PR','Intervallo PR','⚪','pr'],
     ['Conduzione','Disturbi della conduzione','⚪','conduzione'],
@@ -414,6 +460,47 @@ function ecgView(examId){
             ${optionButton(examId,'rhythmRegularity','regolare','Regolare',state.rhythmRegularity)}
             ${optionButton(examId,'rhythmRegularity','regolarmente_irregolare','Regolarmente irregolare',state.rhythmRegularity)}
             ${optionButton(examId,'rhythmRegularity','irregolare','Irregolare',state.rhythmRegularity)}
+          </div>
+        </div>
+      `:''}
+
+      ${state.openStep===key&&key==='onda-p'?`
+        <div class="card" style="margin:12px 0">
+          <h3>Onda P</h3>
+
+          <div class="exam-grid">
+            ${optionButton(examId,'pWaveMode','normal','Normale',state.pWaveMode)}
+            ${optionButton(examId,'pWaveMode','detail','Approfondisci',state.pWaveMode)}
+          </div>
+
+          ${state.pWaveMode==='detail'?`
+            <p><b>Alterazioni rilevate</b></p>
+            <div class="exam-grid">
+              ${toggleButton(examId,'pWaveFindings','ampiezza_aumentata','Aumentata in ampiezza',state.pWaveFindings)}
+              ${toggleButton(examId,'pWaveFindings','durata_aumentata','Aumentata in durata',state.pWaveFindings)}
+              ${toggleButton(examId,'pWaveFindings','bifida','Bifida',state.pWaveFindings)}
+              ${toggleButton(examId,'pWaveFindings','negativa','Negativa',state.pWaveFindings)}
+              ${toggleButton(examId,'pWaveFindings','assente','Assente',state.pWaveFindings)}
+              ${toggleButton(examId,'pWaveFindings','variabile','Variabile',state.pWaveFindings)}
+              ${toggleButton(examId,'pWaveFindings','altro','Altro',state.pWaveFindings)}
+            </div>
+          `:''}
+
+          <div class="grid" style="margin-top:16px">
+            <label>Durata P (s)
+              <input inputmode="decimal"
+                value="${esc(state.pWaveDuration)}"
+                data-ecg-input="${examId}"
+                data-field="pWaveDuration"
+                placeholder="es. 0,04">
+            </label>
+            <label>Ampiezza P (mV)
+              <input inputmode="decimal"
+                value="${esc(state.pWaveAmplitude)}"
+                data-ecg-input="${examId}"
+                data-field="pWaveAmplitude"
+                placeholder="es. 0,3">
+            </label>
           </div>
         </div>
       `:''}
@@ -652,6 +739,23 @@ function bind(){
     };
   });
 
+  document.querySelectorAll('[data-ecg-toggle]').forEach(b=>{
+    b.onclick=()=>{
+      const examId=b.dataset.ecgToggle;
+      const state=getEcgState(examId);
+      const field=b.dataset.field;
+      const value=b.dataset.value;
+      const list=Array.isArray(state[field])?[...state[field]]:[];
+      const index=list.indexOf(value);
+      if(index>=0) list.splice(index,1);
+      else list.push(value);
+      state[field]=list;
+      state.description=buildEcgDescription(state);
+      state.saved=false;
+      render();
+    };
+  });
+
   document.querySelectorAll('[data-ecg-text]').forEach(t=>{
     t.oninput=()=>{
       const state=getEcgState(t.dataset.ecgText);
@@ -685,7 +789,11 @@ function bind(){
           qrsToP:state.qrsToP,
           heartRate:state.heartRate,
           rhythmOrigin:state.rhythmOrigin,
-          rhythmRegularity:state.rhythmRegularity
+          rhythmRegularity:state.rhythmRegularity,
+          pWaveMode:state.pWaveMode,
+          pWaveFindings:state.pWaveFindings,
+          pWaveDuration:state.pWaveDuration,
+          pWaveAmplitude:state.pWaveAmplitude
         },
         description:state.description||null,
         interpretation:state.interpretation||null,
