@@ -218,15 +218,18 @@ function visitDetail(id){
   <button class="btn secondary" data-back-patient="${p.id}">Torna al paziente</button>`;
 }
 
-function getEcgState(examId){
+function getEcgState(examId,exam=null){
   if(!ecgUi[examId]){
+    const saved=exam?.report_data||{};
     ecgUi[examId]={
       openStep:null,
-      pToQrs:'',
-      qrsToP:'',
-      description:'',
-      interpretation:'',
-      recommendations:''
+      pToQrs:saved.pToQrs||'',
+      qrsToP:saved.qrsToP||'',
+      description:exam?.description||saved.description||'',
+      interpretation:exam?.interpretation||saved.interpretation||'',
+      recommendations:exam?.recommendations||saved.recommendations||'',
+      saved:false,
+      saving:false
     };
   }
   return ecgUi[examId];
@@ -264,7 +267,7 @@ function ecgView(examId){
 
   if(!p||!v||!e) return '<section class="card">ECG non trovato</section>';
 
-  const state=getEcgState(examId);
+  const state=getEcgState(examId,e);
   const generated=pqrsDescription(state);
   if(generated&&!state.description) state.description=generated;
 
@@ -337,8 +340,11 @@ function ecgView(examId){
 
     <h3>Conclusioni e raccomandazioni</h3>
     <textarea data-ecg-text="${examId}" data-field="recommendations" placeholder="Conclusioni e raccomandazioni">${esc(state.recommendations)}</textarea>
+
+    ${state.saved?'<div class="notice success">ECG salvato correttamente.</div>':''}
   </section>
 
+  <button class="btn fixed" data-save-ecg="${examId}">${state.saving?'Salvataggio…':'Salva ECG'}</button>
   <button class="btn secondary" data-back-visit="${v.id}">Torna alla visita</button>`;
 }
 
@@ -551,6 +557,7 @@ function bind(){
       const state=getEcgState(examId);
       state[b.dataset.field]=b.dataset.value;
       state.description=pqrsDescription(state);
+      state.saved=false;
       render();
     };
   });
@@ -559,6 +566,43 @@ function bind(){
     t.oninput=()=>{
       const state=getEcgState(t.dataset.ecgText);
       state[t.dataset.field]=t.value;
+      state.saved=false;
+    };
+  });
+
+  document.querySelectorAll('[data-save-ecg]').forEach(b=>{
+    b.onclick=async()=>{
+      const examId=b.dataset.saveEcg;
+      const state=getEcgState(examId);
+      state.saving=true;
+      state.saved=false;
+      render();
+
+      const payload={
+        report_data:{
+          pToQrs:state.pToQrs,
+          qrsToP:state.qrsToP
+        },
+        description:state.description||null,
+        interpretation:state.interpretation||null,
+        recommendations:state.recommendations||null
+      };
+
+      const {error}=await sb
+        .from('exams')
+        .update(payload)
+        .eq('id',examId);
+
+      state.saving=false;
+
+      if(error){
+        alert(error.message);
+        render();
+        return;
+      }
+
+      state.saved=true;
+      render();
     };
   });
 
