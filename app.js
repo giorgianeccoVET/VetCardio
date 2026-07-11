@@ -248,6 +248,8 @@ function getEcgState(examId,exam=null){
       qrsAmplitude:saved.qrsAmplitude||'',
       prMode:saved.prMode||'',
       prValue:saved.prValue||'',
+      wanderingDecision:saved.wanderingDecision||'',
+      bav1Decision:saved.bav1Decision||'',
       description:exam?.description||saved.description||'',
       interpretation:exam?.interpretation||saved.interpretation||'',
       recommendations:exam?.recommendations||saved.recommendations||'',
@@ -417,6 +419,49 @@ function prDot(state){
   if(state.prMode==='normal') return '🟢';
   if(state.prMode) return '🟠';
   return '⚪';
+}
+
+function wanderingSuggested(state){
+  return state.rhythmOrigin==='sinusale'
+    && state.rhythmRegularity==='regolarmente_irregolare'
+    && state.pWaveFindings.includes('variabile')
+    && state.prMode==='variable';
+}
+
+function bav1Suggested(state){
+  return state.pToQrs==='yes'
+    && state.qrsToP==='yes'
+    && state.prMode==='prolonged';
+}
+
+function decisionLabel(value){
+  return ({
+    confirm:'Confermo',
+    reject:'Non confermo',
+    inconclusive:'Non conclusivo'
+  })[value]||'';
+}
+
+function buildEcgInterpretation(state){
+  const parts=[];
+
+  if(wanderingSuggested(state)){
+    if(state.wanderingDecision==='confirm'){
+      parts.push('Ritmo sinusale con pacemaker migrante (wandering pacemaker).');
+    }else if(state.wanderingDecision==='inconclusive'){
+      parts.push('Reperti suggestivi ma non conclusivi per pacemaker migrante (wandering pacemaker).');
+    }
+  }
+
+  if(bav1Suggested(state)){
+    if(state.bav1Decision==='confirm'){
+      parts.push('Blocco atrioventricolare di I grado.');
+    }else if(state.bav1Decision==='inconclusive'){
+      parts.push('Intervallo PR prolungato, reperto non conclusivo per blocco atrioventricolare di I grado.');
+    }
+  }
+
+  return parts.join(' ');
 }
 
 function optionButton(examId,field,value,label,current){
@@ -657,6 +702,39 @@ function ecgView(examId){
     `).join('')}
   </section>
 
+  ${(wanderingSuggested(state)||bav1Suggested(state))?`
+    <section class="card">
+      <h3>Suggerimenti VetCardio</h3>
+      <p class="meta">VetCardio propone un’interpretazione, ma la conferma resta sempre tua.</p>
+
+      ${wanderingSuggested(state)?`
+        <div class="notice">
+          <b>Possibile wandering pacemaker</b><br>
+          Ritmo sinusale regolarmente irregolare, onda P variabile e intervallo PR variabile.
+          <p><b>Sei d’accordo con questa interpretazione?</b></p>
+          <div class="exam-grid">
+            ${optionButton(examId,'wanderingDecision','confirm','Confermo',state.wanderingDecision)}
+            ${optionButton(examId,'wanderingDecision','reject','Non confermo',state.wanderingDecision)}
+            ${optionButton(examId,'wanderingDecision','inconclusive','Non conclusivo',state.wanderingDecision)}
+          </div>
+        </div>
+      `:''}
+
+      ${bav1Suggested(state)?`
+        <div class="notice">
+          <b>Possibile BAV di I grado</b><br>
+          Tutte le onde P risultano condotte e l’intervallo PR è allungato.
+          <p><b>Sei d’accordo con questa interpretazione?</b></p>
+          <div class="exam-grid">
+            ${optionButton(examId,'bav1Decision','confirm','Confermo',state.bav1Decision)}
+            ${optionButton(examId,'bav1Decision','reject','Non confermo',state.bav1Decision)}
+            ${optionButton(examId,'bav1Decision','inconclusive','Non conclusivo',state.bav1Decision)}
+          </div>
+        </div>
+      `:''}
+    </section>
+  `:''}
+
   <section class="card">
     <h3>Descrizione</h3>
     <p class="meta">Il testo si aggiorna mentre compili.</p>
@@ -884,6 +962,14 @@ function bind(){
       const state=getEcgState(examId);
       state[b.dataset.field]=b.dataset.value;
       state.description=buildEcgDescription(state);
+      if(
+        b.dataset.field==='wanderingDecision'
+        || b.dataset.field==='bav1Decision'
+        || wanderingSuggested(state)
+        || bav1Suggested(state)
+      ){
+        state.interpretation=buildEcgInterpretation(state);
+      }
       state.saved=false;
       render();
     };
@@ -901,6 +987,7 @@ function bind(){
       else list.push(value);
       state[field]=list;
       state.description=buildEcgDescription(state);
+      state.interpretation=buildEcgInterpretation(state);
       state.saved=false;
       render();
     };
@@ -919,9 +1006,12 @@ function bind(){
       const state=getEcgState(t.dataset.ecgInput);
       state[t.dataset.field]=t.value;
       state.description=buildEcgDescription(state);
+      state.interpretation=buildEcgInterpretation(state);
       state.saved=false;
       const description=document.getElementById('ecgDescription');
       if(description) description.value=state.description;
+      const interpretation=document.querySelector('[data-ecg-text][data-field="interpretation"]');
+      if(interpretation) interpretation.value=state.interpretation;
     };
   });
 
@@ -949,7 +1039,9 @@ function bind(){
           qrsDuration:state.qrsDuration,
           qrsAmplitude:state.qrsAmplitude,
           prMode:state.prMode,
-          prValue:state.prValue
+          prValue:state.prValue,
+          wanderingDecision:state.wanderingDecision,
+          bav1Decision:state.bav1Decision
         },
         description:state.description||null,
         interpretation:state.interpretation||null,
