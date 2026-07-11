@@ -267,6 +267,10 @@ function getEcgState(examId,exam=null){
       ectopyPatterns:Array.isArray(saved.ectopyPatterns)?saved.ectopyPatterns:[],
       ectopyMorphology:saved.ectopyMorphology||'',
       ectopyCount:saved.ectopyCount||'',
+      tWaveMode:saved.tWaveMode||'',
+      tWavePolarity:saved.tWavePolarity||'',
+      tWaveFindings:Array.isArray(saved.tWaveFindings)?saved.tWaveFindings:[],
+      tWaveAmplitude:saved.tWaveAmplitude||'',
       description:exam?.description||saved.description||'',
       interpretation:exam?.interpretation||saved.interpretation||'',
       recommendations:exam?.recommendations||saved.recommendations||'',
@@ -387,6 +391,20 @@ function buildEcgDescription(state){
     if(morphology) sentence+=`, ${morphology}`;
     if(state.ectopyCount) sentence+=` (n. ${state.ectopyCount})`;
     parts.push(sentence+'.');
+  }
+
+  if(state.tWaveMode==='normal'){
+    parts.push('Onda T nei limiti della norma.');
+  }else if(state.tWaveMode==='detail'){
+    const polarity=tWavePolarityLabel(state.tWavePolarity);
+    const findings=state.tWaveFindings.map(tWaveFindingLabel);
+    let sentence='Onda T';
+    if(polarity) sentence+=` ${polarity}`;
+    if(findings.length) sentence+=`${polarity?', ': ' '}${findings.join(', ')}`;
+    if(state.tWaveAmplitude) sentence+=` (ampiezza ${state.tWaveAmplitude} mV)`;
+    parts.push(sentence+'.');
+  }else if(state.tWaveAmplitude){
+    parts.push(`Ampiezza dell’onda T pari a ${state.tWaveAmplitude} mV.`);
   }
 
   return parts.join(' ');
@@ -523,6 +541,32 @@ function ectopyDot(state){
   return '⚪';
 }
 
+function tWaveFindingLabel(value){
+  return ({
+    tall:'aumentata in ampiezza',
+    flattened:'appiattita',
+    biphasic:'bifasica',
+    notched:'incisurata',
+    asymmetric:'asimmetrica',
+    variable:'variabile',
+    other:'con altra alterazione'
+  })[value]||value;
+}
+
+function tWavePolarityLabel(value){
+  return ({
+    positive:'positiva',
+    negative:'negativa',
+    variable:'variabile'
+  })[value]||'';
+}
+
+function tWaveDot(state){
+  if(state.tWaveMode==='normal') return '🟢';
+  if(state.tWaveMode==='detail') return '🟠';
+  return '⚪';
+}
+
 function decisionLabel(value){
   return ({
     confirm:'Confermo',
@@ -605,7 +649,7 @@ function ecgView(examId){
     ['PR','Intervallo PR',prDot(state),'pr'],
     ['Conduzione','Disturbi della conduzione',conductionDot(state),'conduzione'],
     ['Extrasistoli','Battiti ectopici',ectopyDot(state),'extrasistoli'],
-    ['Onda T','Morfologia dell’onda T','⚪','onda-t'],
+    ['Onda T','Morfologia dell’onda T',tWaveDot(state),'onda-t'],
     ['QT','Intervallo QT','⚪','qt'],
     ['Asse','Asse elettrico','⚪','asse'],
     ['Diagnosi','Interpretazione elettrocardiografica','⚪','diagnosi'],
@@ -891,6 +935,47 @@ function ecgView(examId){
           `:''}
         </div>
       `:''}
+
+      ${state.openStep===key&&key==='onda-t'?`
+        <div class="card" style="margin:12px 0">
+          <h3>Onda T</h3>
+
+          <div class="exam-grid">
+            ${optionButton(examId,'tWaveMode','normal','Normale',state.tWaveMode)}
+            ${optionButton(examId,'tWaveMode','detail','Approfondisci',state.tWaveMode)}
+          </div>
+
+          ${state.tWaveMode==='detail'?`
+            <p><b>Polarità</b></p>
+            <div class="exam-grid">
+              ${optionButton(examId,'tWavePolarity','positive','Positiva',state.tWavePolarity)}
+              ${optionButton(examId,'tWavePolarity','negative','Negativa',state.tWavePolarity)}
+              ${optionButton(examId,'tWavePolarity','variable','Variabile',state.tWavePolarity)}
+            </div>
+
+            <p><b>Alterazioni rilevate</b></p>
+            <div class="exam-grid">
+              ${toggleButton(examId,'tWaveFindings','tall','Aumentata in ampiezza',state.tWaveFindings)}
+              ${toggleButton(examId,'tWaveFindings','flattened','Appiattita',state.tWaveFindings)}
+              ${toggleButton(examId,'tWaveFindings','biphasic','Bifasica',state.tWaveFindings)}
+              ${toggleButton(examId,'tWaveFindings','notched','Incisurata',state.tWaveFindings)}
+              ${toggleButton(examId,'tWaveFindings','asymmetric','Asimmetrica',state.tWaveFindings)}
+              ${toggleButton(examId,'tWaveFindings','variable','Variabile',state.tWaveFindings)}
+              ${toggleButton(examId,'tWaveFindings','other','Altro',state.tWaveFindings)}
+            </div>
+          `:''}
+
+          <div class="grid" style="margin-top:16px">
+            <label>Ampiezza T (mV)
+              <input inputmode="decimal"
+                value="${esc(state.tWaveAmplitude)}"
+                data-ecg-input="${examId}"
+                data-field="tWaveAmplitude"
+                placeholder="es. 0,5">
+            </label>
+          </div>
+        </div>
+      `:''}
     `).join('')}
   </section>
 
@@ -902,7 +987,7 @@ function ecgView(examId){
       ${wanderingSuggested(state)?`
         <div class="notice">
           <b>Possibile wandering pacemaker</b><br>
-          Ritmo sinusale regolarmente irregolare, onda P variabile e intervallo PR variabile.
+          Ritmo sinusale regolarmente irregolare e morfologia dell’onda P variabile.
           <p><b>Sei d’accordo con questa interpretazione?</b></p>
           <div class="exam-grid">
             ${optionButton(examId,'wanderingDecision','confirm','Confermo',state.wanderingDecision)}
@@ -1261,7 +1346,11 @@ function bind(){
           ectopyOrigin:state.ectopyOrigin,
           ectopyPatterns:state.ectopyPatterns,
           ectopyMorphology:state.ectopyMorphology,
-          ectopyCount:state.ectopyCount
+          ectopyCount:state.ectopyCount,
+          tWaveMode:state.tWaveMode,
+          tWavePolarity:state.tWavePolarity,
+          tWaveFindings:state.tWaveFindings,
+          tWaveAmplitude:state.tWaveAmplitude
         },
         description:state.description||null,
         interpretation:state.interpretation||null,
