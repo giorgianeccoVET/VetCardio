@@ -262,6 +262,11 @@ function getEcgState(examId,exam=null){
       conductionMode:saved.conductionMode||'',
       bav2Subtype:saved.bav2Subtype||'',
       bav2Decision:saved.bav2Decision||'',
+      ectopyMode:saved.ectopyMode||'',
+      ectopyOrigin:saved.ectopyOrigin||'',
+      ectopyPatterns:Array.isArray(saved.ectopyPatterns)?saved.ectopyPatterns:[],
+      ectopyMorphology:saved.ectopyMorphology||'',
+      ectopyCount:saved.ectopyCount||'',
       description:exam?.description||saved.description||'',
       interpretation:exam?.interpretation||saved.interpretation||'',
       recommendations:exam?.recommendations||saved.recommendations||'',
@@ -369,6 +374,21 @@ function buildEcgDescription(state){
     parts.push(`Intervallo PR pari a ${state.prValue} ms.`);
   }
 
+  if(state.ectopyMode==='none'){
+    parts.push('Non si rilevano battiti ectopici nel tracciato registrato.');
+  }else if(state.ectopyMode==='present'){
+    const origin=ectopyOriginLabel(state.ectopyOrigin);
+    const patterns=state.ectopyPatterns.map(ectopyPatternLabel);
+    const morphology=ectopyMorphologyLabel(state.ectopyMorphology);
+
+    let sentence='Si rilevano extrasistoli';
+    if(origin) sentence+=` ${origin}`;
+    if(patterns.length) sentence+=` ${patterns.join(', ')}`;
+    if(morphology) sentence+=`, ${morphology}`;
+    if(state.ectopyCount) sentence+=` (n. ${state.ectopyCount})`;
+    parts.push(sentence+'.');
+  }
+
   return parts.join(' ');
 }
 
@@ -440,8 +460,7 @@ function prDot(state){
 function wanderingSuggested(state){
   return state.rhythmOrigin==='sinusale'
     && state.rhythmRegularity==='regolarmente_irregolare'
-    && state.pWaveFindings.includes('variabile')
-    && state.prMode==='variable_nonprogressive';
+    && state.pWaveFindings.includes('variabile');
 }
 
 function bav1Suggested(state){
@@ -469,6 +488,38 @@ function conductionDot(state){
   if(state.conductionMode==='none') return '🟢';
   if(state.conductionMode) return '🟠';
   if(bav2Suggested(state)) return '🟠';
+  return '⚪';
+}
+
+function ectopyOriginLabel(value){
+  return ({
+    supraventricular:'sopraventricolari',
+    ventricular:'ventricolari',
+    uncertain:'di origine non determinabile'
+  })[value]||'';
+}
+
+function ectopyPatternLabel(value){
+  return ({
+    isolated:'isolate',
+    couplets:'in coppie',
+    triplets:'in triplette',
+    runs:'in salve',
+    bigeminy:'con pattern di bigeminismo',
+    trigeminy:'con pattern di trigeminismo'
+  })[value]||value;
+}
+
+function ectopyMorphologyLabel(value){
+  return ({
+    monomorphic:'monomorfe',
+    polymorphic:'polimorfe'
+  })[value]||'';
+}
+
+function ectopyDot(state){
+  if(state.ectopyMode==='none') return '🟢';
+  if(state.ectopyMode==='present') return '🟠';
   return '⚪';
 }
 
@@ -553,7 +604,7 @@ function ecgView(examId){
     ['QRS','Morfologia, durata e ampiezza',qrsDot(state),'qrs'],
     ['PR','Intervallo PR',prDot(state),'pr'],
     ['Conduzione','Disturbi della conduzione',conductionDot(state),'conduzione'],
-    ['Extrasistoli','Battiti ectopici','⚪','extrasistoli'],
+    ['Extrasistoli','Battiti ectopici',ectopyDot(state),'extrasistoli'],
     ['Onda T','Morfologia dell’onda T','⚪','onda-t'],
     ['QT','Intervallo QT','⚪','qt'],
     ['Asse','Asse elettrico','⚪','asse'],
@@ -788,6 +839,54 @@ function ecgView(examId){
               ${optionButton(examId,'bav2Subtype','two_to_one','2:1',state.bav2Subtype)}
               ${optionButton(examId,'bav2Subtype','high_grade','Alto grado',state.bav2Subtype)}
               ${optionButton(examId,'bav2Subtype','unclassified','Non classificabile',state.bav2Subtype)}
+            </div>
+          `:''}
+        </div>
+      `:''}
+
+      ${state.openStep===key&&key==='extrasistoli'?`
+        <div class="card" style="margin:12px 0">
+          <h3>Extrasistoli</h3>
+
+          <div class="exam-grid">
+            ${optionButton(examId,'ectopyMode','none','Assenti',state.ectopyMode)}
+            ${optionButton(examId,'ectopyMode','present','Presenti',state.ectopyMode)}
+          </div>
+
+          ${state.ectopyMode==='present'?`
+            <p><b>Origine</b></p>
+            <div class="exam-grid">
+              ${optionButton(examId,'ectopyOrigin','supraventricular','Sopraventricolari',state.ectopyOrigin)}
+              ${optionButton(examId,'ectopyOrigin','ventricular','Ventricolari',state.ectopyOrigin)}
+              ${optionButton(examId,'ectopyOrigin','uncertain','Non determinabile',state.ectopyOrigin)}
+            </div>
+
+            <p><b>Distribuzione</b></p>
+            <div class="exam-grid">
+              ${toggleButton(examId,'ectopyPatterns','isolated','Isolate',state.ectopyPatterns)}
+              ${toggleButton(examId,'ectopyPatterns','couplets','Coppie',state.ectopyPatterns)}
+              ${toggleButton(examId,'ectopyPatterns','triplets','Triplette',state.ectopyPatterns)}
+              ${toggleButton(examId,'ectopyPatterns','runs','Salve',state.ectopyPatterns)}
+              ${toggleButton(examId,'ectopyPatterns','bigeminy','Bigeminismo',state.ectopyPatterns)}
+              ${toggleButton(examId,'ectopyPatterns','trigeminy','Trigeminismo',state.ectopyPatterns)}
+            </div>
+
+            ${state.ectopyOrigin==='ventricular'?`
+              <p><b>Morfologia</b></p>
+              <div class="exam-grid">
+                ${optionButton(examId,'ectopyMorphology','monomorphic','Monomorfe',state.ectopyMorphology)}
+                ${optionButton(examId,'ectopyMorphology','polymorphic','Polimorfe',state.ectopyMorphology)}
+              </div>
+            `:''}
+
+            <div class="grid" style="margin-top:16px">
+              <label>Numero osservato
+                <input inputmode="numeric"
+                  value="${esc(state.ectopyCount)}"
+                  data-ecg-input="${examId}"
+                  data-field="ectopyCount"
+                  placeholder="es. 3">
+              </label>
             </div>
           `:''}
         </div>
@@ -1157,7 +1256,12 @@ function bind(){
           bav1Decision:state.bav1Decision,
           conductionMode:state.conductionMode,
           bav2Subtype:state.bav2Subtype,
-          bav2Decision:state.bav2Decision
+          bav2Decision:state.bav2Decision,
+          ectopyMode:state.ectopyMode,
+          ectopyOrigin:state.ectopyOrigin,
+          ectopyPatterns:state.ectopyPatterns,
+          ectopyMorphology:state.ectopyMorphology,
+          ectopyCount:state.ectopyCount
         },
         description:state.description||null,
         interpretation:state.interpretation||null,
