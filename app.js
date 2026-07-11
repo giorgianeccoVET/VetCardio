@@ -225,6 +225,9 @@ function getEcgState(examId,exam=null){
       openStep:null,
       pToQrs:saved.pToQrs||'',
       qrsToP:saved.qrsToP||'',
+      heartRate:saved.heartRate||'',
+      rhythmOrigin:saved.rhythmOrigin||'',
+      rhythmRegularity:saved.rhythmRegularity||'',
       description:exam?.description||saved.description||'',
       interpretation:exam?.interpretation||saved.interpretation||'',
       recommendations:exam?.recommendations||saved.recommendations||'',
@@ -252,6 +255,56 @@ function pqrsDescription(state){
   return parts.length?`Si osserva che ${parts.join(' e ')}.`:'';
 }
 
+function rhythmLabel(value){
+  return ({
+    sinusale:'sinusale',
+    atriale:'atriale',
+    giunzionale:'giunzionale',
+    ventricolare:'ventricolare',
+    fibrillazione_atriale:'da fibrillazione atriale',
+    flutter_atriale:'da flutter atriale',
+    altro:'non classificato'
+  })[value]||'';
+}
+
+function regularityLabel(value){
+  return ({
+    regolare:'regolare',
+    regolarmente_irregolare:'regolarmente irregolare',
+    irregolare:'irregolare'
+  })[value]||'';
+}
+
+function buildEcgDescription(state){
+  const parts=[];
+  const pq=pqrsDescription(state);
+  if(pq) parts.push(pq);
+
+  if(state.heartRate){
+    parts.push(`Frequenza cardiaca di ${state.heartRate} bpm.`);
+  }
+
+  if(state.rhythmOrigin||state.rhythmRegularity){
+    const origin=rhythmLabel(state.rhythmOrigin);
+    const reg=regularityLabel(state.rhythmRegularity);
+    if(origin&&reg) parts.push(`Ritmo ${origin} ${reg}.`);
+    else if(origin) parts.push(`Ritmo ${origin}.`);
+    else if(reg) parts.push(`Ritmo ${reg}.`);
+  }
+
+  return parts.join(' ');
+}
+
+function fcDot(state){
+  return state.heartRate?'🟢':'⚪';
+}
+
+function rhythmDot(state){
+  if(state.rhythmOrigin&&state.rhythmRegularity) return '🟢';
+  if(state.rhythmOrigin||state.rhythmRegularity) return '🟠';
+  return '⚪';
+}
+
 function optionButton(examId,field,value,label,current){
   return `<button type="button"
     class="exam ${current===value?'active':''}"
@@ -268,13 +321,13 @@ function ecgView(examId){
   if(!p||!v||!e) return '<section class="card">ECG non trovato</section>';
 
   const state=getEcgState(examId,e);
-  const generated=pqrsDescription(state);
+  const generated=buildEcgDescription(state);
   if(generated&&!state.description) state.description=generated;
 
   const steps=[
     ['P-QRS','Relazione tra onde P e complessi QRS',pqrsDot(state),'pqrs'],
-    ['FC','Frequenza cardiaca','⚪','fc'],
-    ['Ritmo','Origine e regolarità','⚪','ritmo'],
+    ['FC','Frequenza cardiaca',fcDot(state),'fc'],
+    ['Ritmo','Origine e regolarità',rhythmDot(state),'ritmo'],
     ['Onda P','Morfologia e misure','⚪','onda-p'],
     ['QRS','Morfologia, durata e ampiezza','⚪','qrs'],
     ['PR','Intervallo PR','⚪','pr'],
@@ -325,6 +378,43 @@ function ecgView(examId){
           </div>
 
           ${generated?`<div class="notice success">${esc(generated)}</div>`:''}
+        </div>
+      `:''}
+
+      ${state.openStep===key&&key==='fc'?`
+        <div class="card" style="margin:12px 0">
+          <h3>Frequenza cardiaca</h3>
+          <label>FC (bpm)
+            <input type="number" min="1" max="400" inputmode="numeric"
+              value="${esc(state.heartRate)}"
+              data-ecg-input="${examId}"
+              data-field="heartRate"
+              placeholder="es. 92">
+          </label>
+        </div>
+      `:''}
+
+      ${state.openStep===key&&key==='ritmo'?`
+        <div class="card" style="margin:12px 0">
+          <h3>Ritmo</h3>
+
+          <p><b>Origine</b></p>
+          <div class="exam-grid">
+            ${optionButton(examId,'rhythmOrigin','sinusale','Sinusale',state.rhythmOrigin)}
+            ${optionButton(examId,'rhythmOrigin','atriale','Atriale',state.rhythmOrigin)}
+            ${optionButton(examId,'rhythmOrigin','giunzionale','Giunzionale',state.rhythmOrigin)}
+            ${optionButton(examId,'rhythmOrigin','ventricolare','Ventricolare',state.rhythmOrigin)}
+            ${optionButton(examId,'rhythmOrigin','fibrillazione_atriale','Fibrillazione atriale',state.rhythmOrigin)}
+            ${optionButton(examId,'rhythmOrigin','flutter_atriale','Flutter atriale',state.rhythmOrigin)}
+            ${optionButton(examId,'rhythmOrigin','altro','Altro',state.rhythmOrigin)}
+          </div>
+
+          <p><b>Regolarità</b></p>
+          <div class="exam-grid">
+            ${optionButton(examId,'rhythmRegularity','regolare','Regolare',state.rhythmRegularity)}
+            ${optionButton(examId,'rhythmRegularity','regolarmente_irregolare','Regolarmente irregolare',state.rhythmRegularity)}
+            ${optionButton(examId,'rhythmRegularity','irregolare','Irregolare',state.rhythmRegularity)}
+          </div>
         </div>
       `:''}
     `).join('')}
@@ -556,7 +646,7 @@ function bind(){
       const examId=b.dataset.ecgChoice;
       const state=getEcgState(examId);
       state[b.dataset.field]=b.dataset.value;
-      state.description=pqrsDescription(state);
+      state.description=buildEcgDescription(state);
       state.saved=false;
       render();
     };
@@ -567,6 +657,17 @@ function bind(){
       const state=getEcgState(t.dataset.ecgText);
       state[t.dataset.field]=t.value;
       state.saved=false;
+    };
+  });
+
+  document.querySelectorAll('[data-ecg-input]').forEach(t=>{
+    t.oninput=()=>{
+      const state=getEcgState(t.dataset.ecgInput);
+      state[t.dataset.field]=t.value;
+      state.description=buildEcgDescription(state);
+      state.saved=false;
+      const description=document.getElementById('ecgDescription');
+      if(description) description.value=state.description;
     };
   });
 
@@ -581,7 +682,10 @@ function bind(){
       const payload={
         report_data:{
           pToQrs:state.pToQrs,
-          qrsToP:state.qrsToP
+          qrsToP:state.qrsToP,
+          heartRate:state.heartRate,
+          rhythmOrigin:state.rhythmOrigin,
+          rhythmRegularity:state.rhythmRegularity
         },
         description:state.description||null,
         interpretation:state.interpretation||null,
