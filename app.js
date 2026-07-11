@@ -268,6 +268,7 @@ function getEcgState(examId,exam=null){
       ectopyMorphology:saved.ectopyMorphology||'',
       ectopyCount:saved.ectopyCount||'',
       stSegment:saved.stSegment||'',
+      stDeviation:saved.stDeviation||'',
       tWaveMorphology:saved.tWaveMorphology||(saved.tWaveMode==='normal'?'regular':saved.tWaveMode==='detail'?'altered':''),
       tWavePolarity:saved.tWavePolarity||'',
       tWaveFindings:Array.isArray(saved.tWaveFindings)?saved.tWaveFindings:[],
@@ -396,7 +397,11 @@ function buildEcgDescription(state){
 
   if(state.stSegment){
     const st=stSegmentLabel(state.stSegment);
-    parts.push(`Segmento ST ${st}.`);
+    if((state.stSegment==='elevated'||state.stSegment==='depressed')&&state.stDeviation){
+      parts.push(`Segmento ST ${st}, con deviazione di ${String(state.stDeviation).replace('.',',')} mV rispetto alla linea isoelettrica.`);
+    }else{
+      parts.push(`Segmento ST ${st}.`);
+    }
   }
 
   if(state.tWaveMorphology||state.tWavePolarity||state.tWaveFindings.length||state.tWaveAmplitude){
@@ -961,6 +966,19 @@ function ecgView(examId){
             ${optionButton(examId,'stSegment','not_evaluable','Non valutabile',state.stSegment)}
           </div>
 
+          ${(state.stSegment==='elevated'||state.stSegment==='depressed')?`
+            <div class="grid" style="margin-top:16px">
+              <label>Deviazione ST (mV)
+                <input inputmode="decimal"
+                  value="${esc(state.stDeviation)}"
+                  data-ecg-input="${examId}"
+                  data-field="stDeviation"
+                  placeholder="es. 0,1">
+              </label>
+            </div>
+            <p class="meta">Misura la deviazione rispetto alla linea isoelettrica di riferimento.</p>
+          `:''}
+
           <p><b>Morfologia dell’onda T</b></p>
           <div class="exam-grid">
             ${optionButton(examId,'tWaveMorphology','regular','Regolare',state.tWaveMorphology)}
@@ -1371,6 +1389,7 @@ function bind(){
           ectopyMorphology:state.ectopyMorphology,
           ectopyCount:state.ectopyCount,
           stSegment:state.stSegment,
+          stDeviation:state.stDeviation,
           tWaveMorphology:state.tWaveMorphology,
           tWavePolarity:state.tWavePolarity,
           tWaveFindings:state.tWaveFindings,
