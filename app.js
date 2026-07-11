@@ -218,6 +218,16 @@ function visitDetail(id){
   <button class="btn secondary" data-back-patient="${p.id}">Torna al paziente</button>`;
 }
 
+function normalizePWaveDurationMs(value){
+  if(value===null||value===undefined||value==='') return '';
+  const raw=String(value).trim();
+  const numeric=Number(raw.replace(',','.'));
+  if(Number.isFinite(numeric) && numeric>0 && numeric<1){
+    return String(Math.round(numeric*1000));
+  }
+  return raw;
+}
+
 function getEcgState(examId,exam=null){
   if(!ecgUi[examId]){
     const saved=exam?.report_data||{};
@@ -230,7 +240,7 @@ function getEcgState(examId,exam=null){
       rhythmRegularity:saved.rhythmRegularity||'',
       pWaveMode:saved.pWaveMode||'',
       pWaveFindings:Array.isArray(saved.pWaveFindings)?saved.pWaveFindings:[],
-      pWaveDuration:saved.pWaveDuration||'',
+      pWaveDuration:normalizePWaveDurationMs(saved.pWaveDuration),
       pWaveAmplitude:saved.pWaveAmplitude||'',
       description:exam?.description||saved.description||'',
       interpretation:exam?.interpretation||saved.interpretation||'',
@@ -307,7 +317,7 @@ function buildEcgDescription(state){
   }
 
   const measures=[];
-  if(state.pWaveDuration) measures.push(`durata ${state.pWaveDuration} s`);
+  if(state.pWaveDuration) measures.push(`durata ${state.pWaveDuration} ms`);
   if(state.pWaveAmplitude) measures.push(`ampiezza ${state.pWaveAmplitude} mV`);
   if(measures.length) parts.push(`Misure dell’onda P: ${measures.join(', ')}.`);
 
@@ -487,12 +497,12 @@ function ecgView(examId){
           `:''}
 
           <div class="grid" style="margin-top:16px">
-            <label>Durata P (s)
+            <label>Durata P (ms)
               <input inputmode="decimal"
                 value="${esc(state.pWaveDuration)}"
                 data-ecg-input="${examId}"
                 data-field="pWaveDuration"
-                placeholder="es. 0,04">
+                placeholder="es. 40">
             </label>
             <label>Ampiezza P (mV)
               <input inputmode="decimal"
