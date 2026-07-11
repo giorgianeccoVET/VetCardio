@@ -7,6 +7,7 @@ let sb;
 let session;
 let route={name:'home'};
 let patients=[];
+const ecgUi={};
 
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({
   '&':'&amp;',
@@ -217,6 +218,45 @@ function visitDetail(id){
   <button class="btn secondary" data-back-patient="${p.id}">Torna al paziente</button>`;
 }
 
+function getEcgState(examId){
+  if(!ecgUi[examId]){
+    ecgUi[examId]={
+      openStep:null,
+      pToQrs:'',
+      qrsToP:'',
+      description:'',
+      interpretation:'',
+      recommendations:''
+    };
+  }
+  return ecgUi[examId];
+}
+
+function pqrsDot(state){
+  if(!state.pToQrs||!state.qrsToP) return '⚪';
+  if(state.pToQrs==='yes'&&state.qrsToP==='yes') return '🟢';
+  return '🟠';
+}
+
+function pqrsDescription(state){
+  if(!state.pToQrs&&!state.qrsToP) return '';
+  if(state.pToQrs==='yes'&&state.qrsToP==='yes'){
+    return 'Ogni onda P è seguita da un complesso QRS e ogni complesso QRS è preceduto da un’onda P.';
+  }
+  const parts=[];
+  if(state.pToQrs==='no') parts.push('non tutte le onde P sono seguite da un complesso QRS');
+  if(state.qrsToP==='no') parts.push('non tutti i complessi QRS sono preceduti da un’onda P');
+  return parts.length?`Si osserva che ${parts.join(' e ')}.`:'';
+}
+
+function optionButton(examId,field,value,label,current){
+  return `<button type="button"
+    class="exam ${current===value?'active':''}"
+    data-ecg-choice="${examId}"
+    data-field="${field}"
+    data-value="${value}">${esc(label)}</button>`;
+}
+
 function ecgView(examId){
   const p=patients.find(p=>(p.visits||[]).some(v=>(v.exams||[]).some(e=>e.id===examId)));
   const v=p?.visits?.find(v=>(v.exams||[]).some(e=>e.id===examId));
@@ -224,54 +264,79 @@ function ecgView(examId){
 
   if(!p||!v||!e) return '<section class="card">ECG non trovato</section>';
 
+  const state=getEcgState(examId);
+  const generated=pqrsDescription(state);
+  if(generated&&!state.description) state.description=generated;
+
   const steps=[
-    ['P-QRS','Relazione tra onde P e complessi QRS'],
-    ['FC','Frequenza cardiaca'],
-    ['Ritmo','Origine e regolarità'],
-    ['Onda P','Morfologia e misure'],
-    ['QRS','Morfologia, durata e ampiezza'],
-    ['PR','Intervallo PR'],
-    ['Conduzione','Disturbi della conduzione'],
-    ['Extrasistoli','Battiti ectopici'],
-    ['Onda T','Morfologia dell’onda T'],
-    ['QT','Intervallo QT'],
-    ['Asse','Asse elettrico'],
-    ['Diagnosi','Interpretazione elettrocardiografica'],
-    ['Raccomandazioni','Approfondimenti consigliati']
+    ['P-QRS','Relazione tra onde P e complessi QRS',pqrsDot(state),'pqrs'],
+    ['FC','Frequenza cardiaca','⚪','fc'],
+    ['Ritmo','Origine e regolarità','⚪','ritmo'],
+    ['Onda P','Morfologia e misure','⚪','onda-p'],
+    ['QRS','Morfologia, durata e ampiezza','⚪','qrs'],
+    ['PR','Intervallo PR','⚪','pr'],
+    ['Conduzione','Disturbi della conduzione','⚪','conduzione'],
+    ['Extrasistoli','Battiti ectopici','⚪','extrasistoli'],
+    ['Onda T','Morfologia dell’onda T','⚪','onda-t'],
+    ['QT','Intervallo QT','⚪','qt'],
+    ['Asse','Asse elettrico','⚪','asse'],
+    ['Diagnosi','Interpretazione elettrocardiografica','⚪','diagnosi'],
+    ['Raccomandazioni','Approfondimenti consigliati','⚪','raccomandazioni']
   ];
 
   return `<section class="card">
     <div class="meta">${fmt(v.visit_date)} · ${esc(p.owners.surname)} – ${esc(p.name)}</div>
     <h2>ECG</h2>
-    <p class="meta">Struttura iniziale del modulo di refertazione.</p>
+    <p class="meta">Il primo passaggio P–QRS è ora interattivo.</p>
   </section>
 
   <section class="card">
     <h3>Analisi del tracciato</h3>
-    ${steps.map(([title,sub],i)=>`
-      <div class="row">
+
+    ${steps.map(([title,sub,dot,key])=>`
+      <div class="row" data-ecg-step="${key}" data-exam-id="${examId}">
         <div style="display:flex;align-items:center;gap:12px">
-          <span class="chip">${i===0?'🟢':'⚪'}</span>
+          <span class="chip">${dot}</span>
           <div>
             <div class="title">${esc(title)}</div>
             <div class="meta">${esc(sub)}</div>
           </div>
         </div>
-        <span>›</span>
+        <span>${state.openStep===key?'⌄':'›'}</span>
       </div>
+
+      ${state.openStep===key&&key==='pqrs'?`
+        <div class="card" style="margin:12px 0">
+          <h3>Relazione P–QRS</h3>
+
+          <p><b>Ogni onda P è seguita da un complesso QRS?</b></p>
+          <div class="exam-grid">
+            ${optionButton(examId,'pToQrs','yes','Sì',state.pToQrs)}
+            ${optionButton(examId,'pToQrs','no','No',state.pToQrs)}
+          </div>
+
+          <p><b>Ogni complesso QRS è preceduto da un’onda P?</b></p>
+          <div class="exam-grid">
+            ${optionButton(examId,'qrsToP','yes','Sì',state.qrsToP)}
+            ${optionButton(examId,'qrsToP','no','No',state.qrsToP)}
+          </div>
+
+          ${generated?`<div class="notice success">${esc(generated)}</div>`:''}
+        </div>
+      `:''}
     `).join('')}
   </section>
 
   <section class="card">
     <h3>Descrizione</h3>
-    <p class="meta">Il testo verrà costruito progressivamente durante la compilazione.</p>
-    <textarea placeholder="Descrizione ECG"></textarea>
+    <p class="meta">Il testo si aggiorna mentre compili.</p>
+    <textarea id="ecgDescription" data-ecg-text="${examId}" data-field="description" placeholder="Descrizione ECG">${esc(state.description)}</textarea>
 
     <h3>Interpretazione</h3>
-    <textarea placeholder="Diagnosi elettrocardiografica"></textarea>
+    <textarea data-ecg-text="${examId}" data-field="interpretation" placeholder="Diagnosi elettrocardiografica">${esc(state.interpretation)}</textarea>
 
     <h3>Conclusioni e raccomandazioni</h3>
-    <textarea placeholder="Conclusioni e raccomandazioni"></textarea>
+    <textarea data-ecg-text="${examId}" data-field="recommendations" placeholder="Conclusioni e raccomandazioni">${esc(state.recommendations)}</textarea>
   </section>
 
   <button class="btn secondary" data-back-visit="${v.id}">Torna alla visita</button>`;
@@ -469,6 +534,32 @@ function bind(){
 
   document.querySelectorAll('[data-back-patient]').forEach(b=>{
     b.onclick=()=>go('patient',b.dataset.backPatient);
+  });
+
+  document.querySelectorAll('[data-ecg-step]').forEach(b=>{
+    b.onclick=()=>{
+      const examId=b.dataset.examId;
+      const state=getEcgState(examId);
+      state.openStep=state.openStep===b.dataset.ecgStep?null:b.dataset.ecgStep;
+      render();
+    };
+  });
+
+  document.querySelectorAll('[data-ecg-choice]').forEach(b=>{
+    b.onclick=()=>{
+      const examId=b.dataset.ecgChoice;
+      const state=getEcgState(examId);
+      state[b.dataset.field]=b.dataset.value;
+      state.description=pqrsDescription(state);
+      render();
+    };
+  });
+
+  document.querySelectorAll('[data-ecg-text]').forEach(t=>{
+    t.oninput=()=>{
+      const state=getEcgState(t.dataset.ecgText);
+      state[t.dataset.field]=t.value;
+    };
   });
 
   logout.onclick=()=>sb.auth.signOut();
