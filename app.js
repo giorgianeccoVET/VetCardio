@@ -267,7 +267,8 @@ function getEcgState(examId,exam=null){
       ectopyPatterns:Array.isArray(saved.ectopyPatterns)?saved.ectopyPatterns:[],
       ectopyMorphology:saved.ectopyMorphology||'',
       ectopyCount:saved.ectopyCount||'',
-      tWaveMode:saved.tWaveMode||'',
+      stSegment:saved.stSegment||'',
+      tWaveMorphology:saved.tWaveMorphology||(saved.tWaveMode==='normal'?'regular':saved.tWaveMode==='detail'?'altered':''),
       tWavePolarity:saved.tWavePolarity||'',
       tWaveFindings:Array.isArray(saved.tWaveFindings)?saved.tWaveFindings:[],
       tWaveAmplitude:saved.tWaveAmplitude||'',
@@ -393,18 +394,21 @@ function buildEcgDescription(state){
     parts.push(sentence+'.');
   }
 
-  if(state.tWaveMode==='normal'){
-    parts.push('Onda T nei limiti della norma.');
-  }else if(state.tWaveMode==='detail'){
+  if(state.stSegment){
+    const st=stSegmentLabel(state.stSegment);
+    parts.push(`Segmento ST ${st}.`);
+  }
+
+  if(state.tWaveMorphology||state.tWavePolarity||state.tWaveFindings.length||state.tWaveAmplitude){
     const polarity=tWavePolarityLabel(state.tWavePolarity);
     const findings=state.tWaveFindings.map(tWaveFindingLabel);
     let sentence='Onda T';
-    if(polarity) sentence+=` ${polarity}`;
-    if(findings.length) sentence+=`${polarity?', ': ' '}${findings.join(', ')}`;
-    if(state.tWaveAmplitude) sentence+=` (ampiezza ${state.tWaveAmplitude} mV)`;
+    if(state.tWaveMorphology==='regular') sentence+=' di morfologia regolare';
+    if(state.tWaveMorphology==='altered') sentence+=' di morfologia alterata';
+    if(polarity) sentence+=`${state.tWaveMorphology?', ': ' '}${polarity}`;
+    if(findings.length) sentence+=`${state.tWaveMorphology||polarity?', ': ' '}${findings.join(', ')}`;
+    if(state.tWaveAmplitude) sentence+=` (ampiezza ${String(state.tWaveAmplitude).replace('.',',')} mV)`;
     parts.push(sentence+'.');
-  }else if(state.tWaveAmplitude){
-    parts.push(`Ampiezza dell’onda T pari a ${state.tWaveAmplitude} mV.`);
   }
 
   return parts.join(' ');
@@ -543,9 +547,7 @@ function ectopyDot(state){
 
 function tWaveFindingLabel(value){
   return ({
-    tall:'aumentata in ampiezza',
     flattened:'appiattita',
-    biphasic:'bifasica',
     notched:'incisurata',
     asymmetric:'asimmetrica',
     variable:'variabile',
@@ -557,14 +559,25 @@ function tWavePolarityLabel(value){
   return ({
     positive:'positiva',
     negative:'negativa',
+    biphasic:'bifasica',
     variable:'variabile'
   })[value]||'';
 }
 
+function stSegmentLabel(value){
+  return ({
+    isoelectric:'isoelettrico',
+    elevated:'sopraslivellato',
+    depressed:'sottoslivellato',
+    not_evaluable:'non valutabile'
+  })[value]||'';
+}
+
 function tWaveDot(state){
-  if(state.tWaveMode==='normal') return '🟢';
-  if(state.tWaveMode==='detail') return '🟠';
-  return '⚪';
+  if(!state.stSegment&&!state.tWaveMorphology&&!state.tWavePolarity) return '⚪';
+  if(state.stSegment==='elevated'||state.stSegment==='depressed'||state.tWaveMorphology==='altered') return '🟠';
+  if(state.stSegment==='isoelectric'&&state.tWaveMorphology==='regular') return '🟢';
+  return '🟠';
 }
 
 function decisionLabel(value){
@@ -938,26 +951,34 @@ function ecgView(examId){
 
       ${state.openStep===key&&key==='onda-t'?`
         <div class="card" style="margin:12px 0">
-          <h3>Onda T</h3>
+          <h3>Segmento ST e onda T</h3>
 
+          <p><b>Segmento ST</b></p>
           <div class="exam-grid">
-            ${optionButton(examId,'tWaveMode','normal','Normale',state.tWaveMode)}
-            ${optionButton(examId,'tWaveMode','detail','Approfondisci',state.tWaveMode)}
+            ${optionButton(examId,'stSegment','isoelectric','Isoelettrico',state.stSegment)}
+            ${optionButton(examId,'stSegment','elevated','Sopraslivellato',state.stSegment)}
+            ${optionButton(examId,'stSegment','depressed','Sottoslivellato',state.stSegment)}
+            ${optionButton(examId,'stSegment','not_evaluable','Non valutabile',state.stSegment)}
           </div>
 
-          ${state.tWaveMode==='detail'?`
-            <p><b>Polarità</b></p>
-            <div class="exam-grid">
-              ${optionButton(examId,'tWavePolarity','positive','Positiva',state.tWavePolarity)}
-              ${optionButton(examId,'tWavePolarity','negative','Negativa',state.tWavePolarity)}
-              ${optionButton(examId,'tWavePolarity','variable','Variabile',state.tWavePolarity)}
-            </div>
+          <p><b>Morfologia dell’onda T</b></p>
+          <div class="exam-grid">
+            ${optionButton(examId,'tWaveMorphology','regular','Regolare',state.tWaveMorphology)}
+            ${optionButton(examId,'tWaveMorphology','altered','Alterata',state.tWaveMorphology)}
+          </div>
 
+          <p><b>Polarità</b></p>
+          <div class="exam-grid">
+            ${optionButton(examId,'tWavePolarity','positive','Positiva',state.tWavePolarity)}
+            ${optionButton(examId,'tWavePolarity','negative','Negativa',state.tWavePolarity)}
+            ${optionButton(examId,'tWavePolarity','biphasic','Bifasica',state.tWavePolarity)}
+            ${optionButton(examId,'tWavePolarity','variable','Variabile',state.tWavePolarity)}
+          </div>
+
+          ${state.tWaveMorphology==='altered'?`
             <p><b>Alterazioni rilevate</b></p>
             <div class="exam-grid">
-              ${toggleButton(examId,'tWaveFindings','tall','Aumentata in ampiezza',state.tWaveFindings)}
               ${toggleButton(examId,'tWaveFindings','flattened','Appiattita',state.tWaveFindings)}
-              ${toggleButton(examId,'tWaveFindings','biphasic','Bifasica',state.tWaveFindings)}
               ${toggleButton(examId,'tWaveFindings','notched','Incisurata',state.tWaveFindings)}
               ${toggleButton(examId,'tWaveFindings','asymmetric','Asimmetrica',state.tWaveFindings)}
               ${toggleButton(examId,'tWaveFindings','variable','Variabile',state.tWaveFindings)}
@@ -966,7 +987,7 @@ function ecgView(examId){
           `:''}
 
           <div class="grid" style="margin-top:16px">
-            <label>Ampiezza T (mV)
+            <label>Ampiezza T (mV) — facoltativa
               <input inputmode="decimal"
                 value="${esc(state.tWaveAmplitude)}"
                 data-ecg-input="${examId}"
@@ -974,6 +995,8 @@ function ecgView(examId){
                 placeholder="es. 0,5">
             </label>
           </div>
+
+          <p class="meta">La polarità positiva, negativa o bifasica può essere fisiologica nel cane; il segmento ST e la morfologia complessiva hanno maggiore peso interpretativo.</p>
         </div>
       `:''}
     `).join('')}
@@ -1347,7 +1370,8 @@ function bind(){
           ectopyPatterns:state.ectopyPatterns,
           ectopyMorphology:state.ectopyMorphology,
           ectopyCount:state.ectopyCount,
-          tWaveMode:state.tWaveMode,
+          stSegment:state.stSegment,
+          tWaveMorphology:state.tWaveMorphology,
           tWavePolarity:state.tWavePolarity,
           tWaveFindings:state.tWaveFindings,
           tWaveAmplitude:state.tWaveAmplitude
