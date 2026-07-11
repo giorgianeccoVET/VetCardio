@@ -639,7 +639,7 @@ function bind(){
     };
   }
 
-  document.querySelectorAll('.exam').forEach(b=>{
+  document.querySelectorAll('.exam[data-exam]').forEach(b=>{
     b.onclick=()=>b.classList.toggle('active');
   });
 
