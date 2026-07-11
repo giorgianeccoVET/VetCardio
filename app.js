@@ -277,6 +277,10 @@ function getEcgState(examId,exam=null){
       qtValue:saved.qtValue||'',
       qtcValue:saved.qtcValue||'',
       qtcFormula:saved.qtcFormula||'',
+      axisEvaluability:saved.axisEvaluability||'',
+      axisMethod:saved.axisMethod||'',
+      axisValue:saved.axisValue||'',
+      axisDecision:saved.axisDecision||'',
       description:exam?.description||saved.description||'',
       interpretation:exam?.interpretation||saved.interpretation||'',
       recommendations:exam?.recommendations||saved.recommendations||'',
@@ -436,6 +440,18 @@ function buildEcgDescription(state){
   if(state.qtcValue){
     const formula=qtcFormulaLabel(state.qtcFormula);
     parts.push(`QT corretto pari a ${String(state.qtcValue).replace('.',',')} ms${formula?` secondo ${formula}`:''}.`);
+  }
+
+  if(state.axisEvaluability==='not_evaluable'){
+    parts.push('Asse elettrico medio del QRS non valutabile.');
+  }else if(state.axisEvaluability==='evaluable'){
+    const formatted=formatAxisValue(state.axisValue);
+    const method=axisMethodLabel(state.axisMethod);
+    if(formatted){
+      parts.push(`Asse elettrico medio del QRS pari a ${formatted}${method?`, determinato mediante ${method}`:''}.`);
+    }else if(method){
+      parts.push(`Asse elettrico medio del QRS valutabile mediante ${method}.`);
+    }
   }
 
   return parts.join(' ');
@@ -631,6 +647,141 @@ function qtDot(state){
   return '⚪';
 }
 
+function normalizeAxisValue(value){
+  if(value===null||value===undefined||String(value).trim()==='') return null;
+  const numeric=Number(String(value).trim().replace(',','.').replace('°','').replace('+',''));
+  if(!Number.isFinite(numeric)) return null;
+  let angle=((numeric+180)%360+360)%360-180;
+  if(angle===-180) angle=180;
+  return Math.round(angle);
+}
+
+function formatAxisValue(value){
+  const angle=normalizeAxisValue(value);
+  if(angle===null) return '';
+  return `${angle>0?'+':''}${angle}°`;
+}
+
+function axisMethodLabel(value){
+  return ({
+    quadrants:'metodo dei quadranti (DI/aVF)',
+    leads:'calcolo mediante le derivazioni periferiche',
+    ruler:'righello/diagramma esassiale',
+    other:'altro metodo'
+  })[value]||'';
+}
+
+function axisProposal(state,species){
+  if(state.axisEvaluability!=='evaluable') return null;
+  const angle=normalizeAxisValue(state.axisValue);
+  if(angle===null) return null;
+
+  const s=String(species||'').toLowerCase();
+  let min=null,max=null;
+  if(s.includes('can')){ min=40; max=100; }
+  else if(s.includes('gatt')||s.includes('fel')){ min=0; max=160; }
+  else return {
+    code:'unclassified',
+    label:'Asse elettrico da interpretare',
+    sentence:`Asse elettrico medio del QRS pari a ${formatAxisValue(angle)}.`,
+    range:'Nessun intervallo orientativo automatico disponibile per questa specie.'
+  };
+
+  if(angle>=min&&angle<=max){
+    return {
+      code:'normal',
+      label:'Asse elettrico nei limiti orientativi',
+      sentence:'Asse elettrico medio del QRS nei limiti orientativi per la specie.',
+      range:`Intervallo orientativo utilizzato: ${min>0?'+':''}${min}° / +${max}°.`
+    };
+  }
+
+  if(angle<min){
+    return {
+      code:'left',
+      label:'Possibile deviazione assiale sinistra',
+      sentence:'Deviazione assiale sinistra.',
+      range:`Valore esterno all’intervallo orientativo ${min>0?'+':''}${min}° / +${max}°.`
+    };
+  }
+
+  return {
+    code:'right',
+    label:'Possibile deviazione assiale destra',
+    sentence:'Deviazione assiale destra.',
+    range:`Valore esterno all’intervallo orientativo ${min>0?'+':''}${min}° / +${max}°.`
+  };
+}
+
+function axisDot(state,species){
+  if(state.axisEvaluability==='not_evaluable') return '🟠';
+  const proposal=axisProposal(state,species);
+  if(!proposal) return state.axisEvaluability==='evaluable'?'🟠':'⚪';
+  if(state.axisDecision==='confirm'&&proposal.code==='normal') return '🟢';
+  return '🟠';
+}
+
+function axisDiagram(state,examId){
+  const angle=normalizeAxisValue(state.axisValue);
+  const radians=(angle===null?0:angle)*Math.PI/180;
+  const cx=160,cy=160,r=112;
+  const x=angle===null?cx:cx+Math.cos(radians)*r;
+  const y=angle===null?cy:cy+Math.sin(radians)*r;
+
+  const axes=[
+    [0,'0° I'],[30,'30°'],[60,'60° II'],[90,'90° aVF'],
+    [120,'120° III'],[150,'150°'],[180,'180°'],
+    [-150,'-150° aVR'],[-120,'-120°'],[-90,'-90°'],
+    [-60,'-60°'],[-30,'-30° aVL']
+  ];
+
+  const lines=axes.map(([deg,label])=>{
+    const rad=deg*Math.PI/180;
+    const x1=cx-Math.cos(rad)*106;
+    const y1=cy-Math.sin(rad)*106;
+    const x2=cx+Math.cos(rad)*106;
+    const y2=cy+Math.sin(rad)*106;
+    const lx=cx+Math.cos(rad)*132;
+    const ly=cy+Math.sin(rad)*132;
+    return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"
+      stroke="#b9ccd3" stroke-width="${deg%90===0?1.8:1}"/>
+      <text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" dominant-baseline="middle"
+        font-size="10" fill="#536b7a">${label}</text>`;
+  }).join('');
+
+  return `<div style="display:flex;justify-content:center;margin:14px 0">
+    <svg viewBox="0 0 320 320" width="100%" style="max-width:460px;touch-action:none;user-select:none"
+      data-axis-pad="${examId}" role="img" aria-label="Diagramma interattivo dell’asse elettrico">
+      <circle cx="160" cy="160" r="116" fill="#f7fbfc" stroke="#0f5b6b" stroke-width="2"/>
+      ${lines}
+
+      <path d="M160 116
+               C144 96 111 103 111 133
+               C111 164 143 188 160 207
+               C178 188 209 164 209 133
+               C209 103 176 96 160 116Z"
+        fill="#f3a18d" stroke="#b85d54" stroke-width="2" opacity="0.92"/>
+      <path d="M160 121 C151 111 135 113 131 128 C128 145 145 163 160 179"
+        fill="none" stroke="#fff4ef" stroke-width="5" stroke-linecap="round"/>
+      <path d="M160 121 C169 111 185 113 189 128 C192 145 175 163 160 179"
+        fill="none" stroke="#fff4ef" stroke-width="5" stroke-linecap="round"/>
+
+      ${angle!==null?`
+        <defs>
+          <marker id="axisArrow-${examId}" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L7,3 z" fill="#c0392b"/>
+          </marker>
+        </defs>
+        <line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}"
+          stroke="#c0392b" stroke-width="4" stroke-linecap="round"
+          marker-end="url(#axisArrow-${examId})"/>
+        <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="7" fill="#c0392b" stroke="white" stroke-width="2"/>
+      `:''}
+      <circle cx="160" cy="160" r="4" fill="#0f5b6b"/>
+    </svg>
+  </div>`;
+}
+
 function decisionLabel(value){
   return ({
     confirm:'Confermo',
@@ -639,7 +790,7 @@ function decisionLabel(value){
   })[value]||'';
 }
 
-function buildEcgInterpretation(state){
+function buildEcgInterpretation(state,species=''){
   const parts=[];
 
   if(wanderingSuggested(state)){
@@ -671,7 +822,19 @@ function buildEcgInterpretation(state){
     }
   }
 
+  const axis=axisProposal(state,species);
+  if(axis&&state.axisDecision==='confirm'){
+    parts.push(axis.sentence);
+  }else if(axis&&state.axisDecision==='inconclusive'){
+    parts.push(`Valore dell’asse elettrico suggestivo ma non conclusivo: ${axis.sentence.charAt(0).toLowerCase()+axis.sentence.slice(1)}`);
+  }
+
   return parts.join(' ');
+}
+
+function speciesForExam(examId){
+  const patient=patients.find(p=>(p.visits||[]).some(v=>(v.exams||[]).some(e=>e.id===examId)));
+  return patient?.species||'';
 }
 
 function optionButton(examId,field,value,label,current){
@@ -715,7 +878,7 @@ function ecgView(examId){
     ['Extrasistoli','Battiti ectopici',ectopyDot(state),'extrasistoli'],
     ['Onda T','Morfologia dell’onda T',tWaveDot(state),'onda-t'],
     ['QT','Intervallo QT',qtDot(state),'qt'],
-    ['Asse','Asse elettrico','⚪','asse'],
+    ['Asse','Asse elettrico',axisDot(state,p.species),'asse'],
     ['Diagnosi','Interpretazione elettrocardiografica','⚪','diagnosi'],
     ['Raccomandazioni','Approfondimenti consigliati','⚪','raccomandazioni']
   ];
@@ -1107,6 +1270,61 @@ function ecgView(examId){
           </div>
         </div>
       `:''}
+
+      ${state.openStep===key&&key==='asse'?`
+        <div class="card" style="margin:12px 0">
+          <h3>Asse elettrico medio del QRS</h3>
+
+          <p><b>Valutabilità</b></p>
+          <div class="exam-grid">
+            ${optionButton(examId,'axisEvaluability','evaluable','Valutabile',state.axisEvaluability)}
+            ${optionButton(examId,'axisEvaluability','not_evaluable','Non valutabile',state.axisEvaluability)}
+          </div>
+
+          ${state.axisEvaluability==='evaluable'?`
+            <p><b>Metodo utilizzato</b></p>
+            <div class="exam-grid">
+              ${optionButton(examId,'axisMethod','quadrants','Quadranti DI/aVF',state.axisMethod)}
+              ${optionButton(examId,'axisMethod','leads','Calcolo derivazioni',state.axisMethod)}
+              ${optionButton(examId,'axisMethod','ruler','Righello/diagramma',state.axisMethod)}
+              ${optionButton(examId,'axisMethod','other','Altro',state.axisMethod)}
+            </div>
+
+            <div class="grid" style="margin-top:16px">
+              <label>Asse elettrico (°)
+                <input inputmode="numeric"
+                  value="${esc(state.axisValue)}"
+                  data-ecg-input="${examId}"
+                  data-field="axisValue"
+                  placeholder="es. +75 oppure -40">
+              </label>
+            </div>
+
+            <p class="meta">Tocca o trascina la freccia sul diagramma. Il valore numerico si aggiorna automaticamente.</p>
+            ${axisDiagram(state,examId)}
+
+            ${(()=>{
+              const proposal=axisProposal(state,p.species);
+              if(!proposal) return '';
+              return `<div class="notice">
+                <b>${esc(proposal.label)}</b><br>
+                ${esc(proposal.range)}
+                ${p.breed?`<br>Razza registrata: <b>${esc(p.breed)}</b>. Il dato va sempre interpretato nel contesto di razza, età e conformazione toracica.`:''}
+                <p><b>Sei d’accordo con questa interpretazione?</b></p>
+                <div class="exam-grid">
+                  ${optionButton(examId,'axisDecision','confirm','Confermo',state.axisDecision)}
+                  ${optionButton(examId,'axisDecision','reject','Non confermo',state.axisDecision)}
+                  ${optionButton(examId,'axisDecision','inconclusive','Non conclusivo',state.axisDecision)}
+                </div>
+              </div>`;
+            })()}
+          `:''}
+
+          ${state.axisEvaluability==='not_evaluable'?`
+            <div class="notice">Nel referto verrà indicato che l’asse elettrico medio del QRS non è valutabile.</div>
+          `:''}
+        </div>
+      `:''}
     `).join('')}
   </section>
 
@@ -1386,6 +1604,9 @@ function bind(){
       const examId=b.dataset.ecgChoice;
       const state=getEcgState(examId);
       state[b.dataset.field]=b.dataset.value;
+      if(b.dataset.field==='axisEvaluability'&&b.dataset.value==='not_evaluable'){
+        state.axisDecision='';
+      }
       state.description=buildEcgDescription(state);
       if(
         b.dataset.field==='wanderingDecision'
@@ -1396,7 +1617,7 @@ function bind(){
         || bav1Suggested(state)
         || bav2Suggested(state)
       ){
-        state.interpretation=buildEcgInterpretation(state);
+        state.interpretation=buildEcgInterpretation(state,speciesForExam(examId));
       }
       state.saved=false;
       render();
@@ -1415,7 +1636,7 @@ function bind(){
       else list.push(value);
       state[field]=list;
       state.description=buildEcgDescription(state);
-      state.interpretation=buildEcgInterpretation(state);
+      state.interpretation=buildEcgInterpretation(state,speciesForExam(examId));
       state.saved=false;
       render();
     };
@@ -1433,14 +1654,61 @@ function bind(){
     t.oninput=()=>{
       const state=getEcgState(t.dataset.ecgInput);
       state[t.dataset.field]=t.value;
+      if(t.dataset.field==='axisValue') state.axisDecision='';
       state.description=buildEcgDescription(state);
-      state.interpretation=buildEcgInterpretation(state);
+      state.interpretation=buildEcgInterpretation(state,speciesForExam(t.dataset.ecgInput));
       state.saved=false;
       const description=document.getElementById('ecgDescription');
       if(description) description.value=state.description;
       const interpretation=document.querySelector('[data-ecg-text][data-field="interpretation"]');
       if(interpretation) interpretation.value=state.interpretation;
     };
+  });
+
+
+  document.querySelectorAll('[data-ecg-input][data-field="axisValue"]').forEach(input=>{
+    input.onblur=()=>{
+      const state=getEcgState(input.dataset.ecgInput);
+      const angle=normalizeAxisValue(input.value);
+      if(angle!==null) state.axisValue=String(angle);
+      state.description=buildEcgDescription(state);
+      state.interpretation=buildEcgInterpretation(state,speciesForExam(input.dataset.ecgInput));
+      state.saved=false;
+      render();
+    };
+  });
+
+  document.querySelectorAll('[data-axis-pad]').forEach(svg=>{
+    const examId=svg.dataset.axisPad;
+    let dragging=false;
+
+    const setAxisFromPointer=event=>{
+      const rect=svg.getBoundingClientRect();
+      const x=(event.clientX-rect.left)*(320/rect.width);
+      const y=(event.clientY-rect.top)*(320/rect.height);
+      let angle=Math.round(Math.atan2(y-160,x-160)*180/Math.PI);
+      if(angle===-180) angle=180;
+
+      const state=getEcgState(examId);
+      state.axisEvaluability='evaluable';
+      state.axisValue=String(angle);
+      state.axisDecision='';
+      state.description=buildEcgDescription(state);
+      state.interpretation=buildEcgInterpretation(state,speciesForExam(examId));
+      state.saved=false;
+      render();
+    };
+
+    svg.onpointerdown=event=>{
+      dragging=true;
+      try{ svg.setPointerCapture(event.pointerId); }catch(_){}
+      setAxisFromPointer(event);
+    };
+    svg.onpointermove=event=>{
+      if(dragging) setAxisFromPointer(event);
+    };
+    svg.onpointerup=()=>{ dragging=false; };
+    svg.onpointercancel=()=>{ dragging=false; };
   });
 
   document.querySelectorAll('[data-save-ecg]').forEach(b=>{
@@ -1487,7 +1755,11 @@ function bind(){
           qtMode:state.qtMode,
           qtValue:state.qtValue,
           qtcValue:state.qtcValue,
-          qtcFormula:state.qtcFormula
+          qtcFormula:state.qtcFormula,
+          axisEvaluability:state.axisEvaluability,
+          axisMethod:state.axisMethod,
+          axisValue:state.axisValue,
+          axisDecision:state.axisDecision
         },
         description:state.description||null,
         interpretation:state.interpretation||null,
