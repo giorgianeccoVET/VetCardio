@@ -278,9 +278,12 @@ function getEcgState(examId,exam=null){
       qtcValue:saved.qtcValue||'',
       qtcFormula:saved.qtcFormula||'',
       axisEvaluability:saved.axisEvaluability||'',
+      axisPosition:saved.axisPosition||'right_lateral',
       axisMethod:saved.axisMethod||'',
       axisValue:saved.axisValue||'',
       axisDecision:saved.axisDecision||'',
+      diagnosisManual:saved.diagnosisManual||'',
+      diagnosisReviewed:saved.diagnosisReviewed||'',
       description:exam?.description||saved.description||'',
       interpretation:exam?.interpretation||saved.interpretation||'',
       recommendations:exam?.recommendations||saved.recommendations||'',
@@ -448,7 +451,8 @@ function buildEcgDescription(state){
     const formatted=formatAxisValue(state.axisValue);
     const method=axisMethodLabel(state.axisMethod);
     if(formatted){
-      parts.push(`Asse elettrico medio del QRS pari a ${formatted}${method?`, determinato mediante ${method}`:''}.`);
+      const position=axisPositionLabel(state.axisPosition);
+      parts.push(`Asse elettrico medio del QRS pari a ${formatted}${method?`, determinato mediante ${method}`:''}${position?`, con paziente in ${position}`:''}.`);
     }else if(method){
       parts.push(`Asse elettrico medio del QRS valutabile mediante ${method}.`);
     }
@@ -671,28 +675,48 @@ function axisMethodLabel(value){
   })[value]||'';
 }
 
+function axisPositionLabel(value){
+  return ({
+    right_lateral:'decubito laterale destro',
+    standing:'in stazione quadrupedale',
+    sitting:'seduto'
+  })[value]||'';
+}
+
+function axisReferenceRange(state,species){
+  const s=String(species||'').toLowerCase();
+  if(!s.includes('can')) return null;
+
+  // Range in piedi/seduto inserito provvisoriamente e da verificare sul testo di riferimento.
+  if(state.axisPosition==='standing'||state.axisPosition==='sitting'){
+    return {min:0,max:100,provisional:true};
+  }
+  return {min:40,max:100,provisional:false};
+}
+
 function axisProposal(state,species){
   if(state.axisEvaluability!=='evaluable') return null;
   const angle=normalizeAxisValue(state.axisValue);
   if(angle===null) return null;
 
-  const s=String(species||'').toLowerCase();
-  let min=null,max=null;
-  if(s.includes('can')){ min=40; max=100; }
-  else if(s.includes('gatt')||s.includes('fel')){ min=0; max=160; }
-  else return {
+  const range=axisReferenceRange(state,species);
+  if(!range) return {
     code:'unclassified',
     label:'Asse elettrico da interpretare',
     sentence:`Asse elettrico medio del QRS pari a ${formatAxisValue(angle)}.`,
     range:'Nessun intervallo orientativo automatico disponibile per questa specie.'
   };
 
+  const {min,max,provisional}=range;
+  const position=axisPositionLabel(state.axisPosition);
+  const suffix=provisional?' Range provvisorio da verificare sulla fonte bibliografica.':'';
+
   if(angle>=min&&angle<=max){
     return {
       code:'normal',
       label:'Asse elettrico nei limiti orientativi',
-      sentence:'Asse elettrico medio del QRS nei limiti orientativi per la specie.',
-      range:`Intervallo orientativo utilizzato: ${min>0?'+':''}${min}° / +${max}°.`
+      sentence:'Asse elettrico medio del QRS nei limiti orientativi per la posizione di registrazione.',
+      range:`Intervallo di riferimento orientativo per ${position}: ${min>0?'+':''}${min}° a +${max}°.${suffix}`
     };
   }
 
@@ -701,7 +725,7 @@ function axisProposal(state,species){
       code:'left',
       label:'Possibile deviazione assiale sinistra',
       sentence:'Deviazione assiale sinistra.',
-      range:`Valore esterno all’intervallo orientativo ${min>0?'+':''}${min}° / +${max}°.`
+      range:`Valore esterno all’intervallo orientativo per ${position}: ${min>0?'+':''}${min}° a +${max}°.${suffix}`
     };
   }
 
@@ -709,7 +733,7 @@ function axisProposal(state,species){
     code:'right',
     label:'Possibile deviazione assiale destra',
     sentence:'Deviazione assiale destra.',
-    range:`Valore esterno all’intervallo orientativo ${min>0?'+':''}${min}° / +${max}°.`
+    range:`Valore esterno all’intervallo orientativo per ${position}: ${min>0?'+':''}${min}° a +${max}°.${suffix}`
   };
 }
 
@@ -721,10 +745,10 @@ function axisDot(state,species){
   return '🟠';
 }
 
-function axisDiagram(state,examId){
+function axisDiagram(state,examId,species){
   const angle=normalizeAxisValue(state.axisValue);
   const radians=(angle===null?0:angle)*Math.PI/180;
-  const cx=160,cy=160,r=112;
+  const cx=160,cy=160,r=118;
   const x=angle===null?cx:cx+Math.cos(radians)*r;
   const y=angle===null?cy:cy+Math.sin(radians)*r;
 
@@ -749,22 +773,39 @@ function axisDiagram(state,examId){
         font-size="10" fill="#536b7a">${label}</text>`;
   }).join('');
 
+  const range=axisReferenceRange(state,species);
+  let sector='';
+  if(range){
+    const start=range.min*Math.PI/180;
+    const end=range.max*Math.PI/180;
+    const sr=113;
+    const sx=cx+Math.cos(start)*sr;
+    const sy=cy+Math.sin(start)*sr;
+    const ex=cx+Math.cos(end)*sr;
+    const ey=cy+Math.sin(end)*sr;
+    const largeArc=(range.max-range.min)>180?1:0;
+    sector=`<path d="M ${cx} ${cy} L ${sx.toFixed(1)} ${sy.toFixed(1)}
+      A ${sr} ${sr} 0 ${largeArc} 1 ${ex.toFixed(1)} ${ey.toFixed(1)} Z"
+      fill="#63b77a" opacity="0.20"/>`;
+  }
+
   return `<div style="display:flex;justify-content:center;margin:14px 0">
     <svg viewBox="0 0 320 320" width="100%" style="max-width:460px;touch-action:none;user-select:none"
       data-axis-pad="${examId}" role="img" aria-label="Diagramma interattivo dell’asse elettrico">
       <circle cx="160" cy="160" r="116" fill="#f7fbfc" stroke="#0f5b6b" stroke-width="2"/>
+      ${sector}
       ${lines}
 
-      <path d="M160 116
-               C144 96 111 103 111 133
-               C111 164 143 188 160 207
-               C178 188 209 164 209 133
-               C209 103 176 96 160 116Z"
+      <path d="M160 121
+               C146 103 118 108 118 134
+               C118 161 145 182 160 199
+               C175 182 202 161 202 134
+               C202 108 174 103 160 121Z"
         fill="#f3a18d" stroke="#b85d54" stroke-width="2" opacity="0.92"/>
-      <path d="M160 121 C151 111 135 113 131 128 C128 145 145 163 160 179"
-        fill="none" stroke="#fff4ef" stroke-width="5" stroke-linecap="round"/>
-      <path d="M160 121 C169 111 185 113 189 128 C192 145 175 163 160 179"
-        fill="none" stroke="#fff4ef" stroke-width="5" stroke-linecap="round"/>
+      <path d="M160 125 C152 116 139 117 136 130 C133 145 147 159 160 173"
+        fill="none" stroke="#fff4ef" stroke-width="4.5" stroke-linecap="round"/>
+      <path d="M160 125 C168 116 181 117 184 130 C187 145 173 159 160 173"
+        fill="none" stroke="#fff4ef" stroke-width="4.5" stroke-linecap="round"/>
 
       ${angle!==null?`
         <defs>
@@ -788,6 +829,87 @@ function decisionLabel(value){
     reject:'Non confermo',
     inconclusive:'Non conclusivo'
   })[value]||'';
+}
+
+function ectopyDiagnosis(state){
+  if(state.ectopyMode!=='present') return '';
+  const origin=({
+    supraventricular:'Extrasistolia sopraventricolare',
+    ventricular:'Extrasistolia ventricolare',
+    uncertain:'Extrasistolia di origine non determinabile'
+  })[state.ectopyOrigin]||'Extrasistolia';
+
+  const patterns=(state.ectopyPatterns||[]).map(value=>({
+    isolated:'isolata',
+    couplets:'in coppie',
+    triplets:'in triplette',
+    runs:'in salve',
+    bigeminy:'con bigeminismo',
+    trigeminy:'con trigeminismo'
+  })[value]).filter(Boolean);
+
+  const morphology=({
+    monomorphic:'monomorfa',
+    polymorphic:'polimorfa'
+  })[state.ectopyMorphology]||'';
+
+  let result=origin;
+  if(morphology) result+=` ${morphology}`;
+  if(patterns.length) result+=`, ${patterns.join(', ')}`;
+  if(state.ectopyCount) result+=` (${state.ectopyCount} complessi osservati)`;
+  return result+'.';
+}
+
+function buildDiagnosisItems(state,species=''){
+  const items=[];
+
+  if(state.rhythmOrigin==='sinusale'){
+    if(state.wanderingDecision==='confirm') items.push('Ritmo sinusale con pacemaker migrante (wandering pacemaker).');
+    else items.push('Ritmo sinusale.');
+  }else if(state.rhythmOrigin==='fibrillazione_atriale'){
+    items.push('Fibrillazione atriale.');
+  }else if(state.rhythmOrigin==='flutter_atriale'){
+    items.push('Flutter atriale.');
+  }else if(state.rhythmOrigin==='atriale'){
+    items.push('Ritmo atriale.');
+  }else if(state.rhythmOrigin==='giunzionale'){
+    items.push('Ritmo giunzionale.');
+  }else if(state.rhythmOrigin==='ventricolare'){
+    items.push('Ritmo ventricolare.');
+  }
+
+  if(state.bav1Decision==='confirm') items.push('Blocco atrioventricolare di I grado.');
+
+  if(state.bav2Decision==='confirm'){
+    const subtype=bav2SubtypeLabel(state.bav2Subtype);
+    items.push(subtype
+      ? `Blocco atrioventricolare di II grado, ${subtype}.`
+      : 'Blocco atrioventricolare di II grado.');
+  }else if(state.conductionMode==='advanced'){
+    items.push('Blocco atrioventricolare avanzato.');
+  }else if(state.conductionMode==='complete'){
+    items.push('Blocco atrioventricolare completo.');
+  }
+
+  const ectopy=ectopyDiagnosis(state);
+  if(ectopy) items.push(ectopy);
+
+  const axis=axisProposal(state,species);
+  if(axis&&state.axisDecision==='confirm'&&axis.code!=='normal'){
+    items.push(axis.sentence);
+  }
+
+  if(state.qtMode==='prolonged') items.push('Intervallo QT allungato.');
+  if(state.qtMode==='shortened') items.push('Intervallo QT accorciato.');
+
+  return [...new Set(items)];
+}
+
+function diagnosisDot(state,species=''){
+  const items=buildDiagnosisItems(state,species);
+  if(state.diagnosisReviewed==='confirmed') return '🟢';
+  if(items.length||state.diagnosisManual) return '🟠';
+  return '⚪';
 }
 
 function buildEcgInterpretation(state,species=''){
@@ -829,7 +951,11 @@ function buildEcgInterpretation(state,species=''){
     parts.push(`Valore dell’asse elettrico suggestivo ma non conclusivo: ${axis.sentence.charAt(0).toLowerCase()+axis.sentence.slice(1)}`);
   }
 
-  return parts.join(' ');
+  if(state.diagnosisManual&&String(state.diagnosisManual).trim()){
+    parts.push(String(state.diagnosisManual).trim());
+  }
+
+  return [...new Set(parts)].join(' ');
 }
 
 function speciesForExam(examId){
@@ -879,7 +1005,7 @@ function ecgView(examId){
     ['Onda T','Morfologia dell’onda T',tWaveDot(state),'onda-t'],
     ['QT','Intervallo QT',qtDot(state),'qt'],
     ['Asse','Asse elettrico',axisDot(state,p.species),'asse'],
-    ['Diagnosi','Interpretazione elettrocardiografica','⚪','diagnosi'],
+    ['Diagnosi','Interpretazione elettrocardiografica',diagnosisDot(state,p.species),'diagnosi'],
     ['Raccomandazioni','Approfondimenti consigliati','⚪','raccomandazioni']
   ];
 
@@ -1282,6 +1408,13 @@ function ecgView(examId){
           </div>
 
           ${state.axisEvaluability==='evaluable'?`
+            <p><b>Posizione del paziente durante la registrazione</b></p>
+            <div class="exam-grid">
+              ${optionButton(examId,'axisPosition','right_lateral','Decubito laterale destro',state.axisPosition)}
+              ${optionButton(examId,'axisPosition','standing','In piedi',state.axisPosition)}
+              ${optionButton(examId,'axisPosition','sitting','Seduto',state.axisPosition)}
+            </div>
+
             <p><b>Metodo utilizzato</b></p>
             <div class="exam-grid">
               ${optionButton(examId,'axisMethod','quadrants','Quadranti DI/aVF',state.axisMethod)}
@@ -1301,7 +1434,8 @@ function ecgView(examId){
             </div>
 
             <p class="meta">Tocca o trascina la freccia sul diagramma. Il valore numerico si aggiorna automaticamente.</p>
-            ${axisDiagram(state,examId)}
+            ${axisDiagram(state,examId,p.species)}
+            <p class="meta">L’asse elettrico deve essere interpretato nel contesto della posizione del paziente, della razza, dell’età e della conformazione toracica.</p>
 
             ${(()=>{
               const proposal=axisProposal(state,p.species);
@@ -1324,6 +1458,42 @@ function ecgView(examId){
             <div class="notice">Nel referto verrà indicato che l’asse elettrico medio del QRS non è valutabile.</div>
           `:''}
         </div>
+
+      ${state.openStep===key&&key==='diagnosi'?`
+        <div class="card" style="margin:12px 0">
+          <h3>Diagnosi ECG</h3>
+          <p class="meta">VetCardio raccoglie qui le interpretazioni già confermate e i reperti strutturati. La diagnosi finale resta sempre modificabile da te.</p>
+
+          ${(()=>{
+            const items=buildDiagnosisItems(state,p.species);
+            if(!items.length) return `<div class="notice">Non sono ancora presenti elementi sufficienti per proporre una diagnosi ECG strutturata.</div>`;
+            return `<div class="notice">
+              <b>Riepilogo proposto</b>
+              <div style="margin-top:10px">
+                ${items.map(item=>`<div style="margin:6px 0">• ${esc(item)}</div>`).join('')}
+              </div>
+            </div>`;
+          })()}
+
+          <label style="display:block;margin-top:16px">
+            Diagnosi aggiuntiva o correzione manuale
+            <textarea rows="4"
+              data-ecg-text="${examId}"
+              data-field="diagnosisManual"
+              placeholder="Aggiungi una diagnosi non proposta oppure specifica meglio il reperto...">${esc(state.diagnosisManual)}</textarea>
+          </label>
+
+          <p><b>Revisione della diagnosi</b></p>
+          <div class="exam-grid">
+            ${optionButton(examId,'diagnosisReviewed','confirmed','Diagnosi revisionata',state.diagnosisReviewed)}
+            ${optionButton(examId,'diagnosisReviewed','to_review','Da rivedere',state.diagnosisReviewed)}
+          </div>
+
+          <div class="notice" style="margin-top:14px">
+            Questa sezione non assegna automaticamente gravità o terapia. Il prossimo modulo sarà dedicato alle raccomandazioni cliniche.
+          </div>
+        </div>
+      `:''}
       `:''}
     `).join('')}
   </section>
@@ -1607,12 +1777,18 @@ function bind(){
       if(b.dataset.field==='axisEvaluability'&&b.dataset.value==='not_evaluable'){
         state.axisDecision='';
       }
+      if(b.dataset.field==='axisPosition'){
+        state.axisDecision='';
+      }
       state.description=buildEcgDescription(state);
       if(
         b.dataset.field==='wanderingDecision'
         || b.dataset.field==='bav1Decision'
         || b.dataset.field==='bav2Decision'
         || b.dataset.field==='bav2Subtype'
+        || b.dataset.field==='axisPosition'
+        || b.dataset.field==='axisDecision'
+        || b.dataset.field==='diagnosisReviewed'
         || wanderingSuggested(state)
         || bav1Suggested(state)
         || bav2Suggested(state)
@@ -1646,6 +1822,9 @@ function bind(){
     t.oninput=()=>{
       const state=getEcgState(t.dataset.ecgText);
       state[t.dataset.field]=t.value;
+      if(t.dataset.field==='diagnosisManual'){
+        state.interpretation=buildEcgInterpretation(state,speciesForExam(t.dataset.ecgText));
+      }
       state.saved=false;
     };
   });
@@ -1757,9 +1936,12 @@ function bind(){
           qtcValue:state.qtcValue,
           qtcFormula:state.qtcFormula,
           axisEvaluability:state.axisEvaluability,
+          axisPosition:state.axisPosition,
           axisMethod:state.axisMethod,
           axisValue:state.axisValue,
-          axisDecision:state.axisDecision
+          axisDecision:state.axisDecision,
+          diagnosisManual:state.diagnosisManual,
+          diagnosisReviewed:state.diagnosisReviewed
         },
         description:state.description||null,
         interpretation:state.interpretation||null,
