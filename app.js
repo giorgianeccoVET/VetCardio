@@ -246,6 +246,8 @@ function getEcgState(examId,exam=null){
       qrsFindings:Array.isArray(saved.qrsFindings)?saved.qrsFindings:[],
       qrsDuration:saved.qrsDuration||'',
       qrsAmplitude:saved.qrsAmplitude||'',
+      prMode:saved.prMode||'',
+      prValue:saved.prValue||'',
       description:exam?.description||saved.description||'',
       interpretation:exam?.interpretation||saved.interpretation||'',
       recommendations:exam?.recommendations||saved.recommendations||'',
@@ -340,6 +342,17 @@ function buildEcgDescription(state){
   if(state.qrsAmplitude) qrsMeasures.push(`ampiezza ${state.qrsAmplitude} mV`);
   if(qrsMeasures.length) parts.push(`Misure del QRS: ${qrsMeasures.join(', ')}.`);
 
+  if(state.prMode){
+    const label=prLabel(state.prMode);
+    if(state.prValue){
+      parts.push(`Intervallo PR ${label}, pari a ${state.prValue} ms.`);
+    }else{
+      parts.push(`Intervallo PR ${label}.`);
+    }
+  }else if(state.prValue){
+    parts.push(`Intervallo PR pari a ${state.prValue} ms.`);
+  }
+
   return parts.join(' ');
 }
 
@@ -391,6 +404,21 @@ function qrsDot(state){
   return '⚪';
 }
 
+function prLabel(value){
+  return ({
+    normal:'nei limiti della norma',
+    prolonged:'allungato',
+    shortened:'accorciato',
+    variable:'variabile'
+  })[value]||'';
+}
+
+function prDot(state){
+  if(state.prMode==='normal') return '🟢';
+  if(state.prMode) return '🟠';
+  return '⚪';
+}
+
 function optionButton(examId,field,value,label,current){
   return `<button type="button"
     class="exam ${current===value?'active':''}"
@@ -427,7 +455,7 @@ function ecgView(examId){
     ['Ritmo','Origine e regolarità',rhythmDot(state),'ritmo'],
     ['Onda P','Morfologia e misure',pWaveDot(state),'onda-p'],
     ['QRS','Morfologia, durata e ampiezza',qrsDot(state),'qrs'],
-    ['PR','Intervallo PR','⚪','pr'],
+    ['PR','Intervallo PR',prDot(state),'pr'],
     ['Conduzione','Disturbi della conduzione','⚪','conduzione'],
     ['Extrasistoli','Battiti ectopici','⚪','extrasistoli'],
     ['Onda T','Morfologia dell’onda T','⚪','onda-t'],
@@ -595,6 +623,35 @@ function ecgView(examId){
                 placeholder="es. 2,5">
             </label>
           </div>
+        </div>
+      `:''}
+
+      ${state.openStep===key&&key==='pr'?`
+        <div class="card" style="margin:12px 0">
+          <h3>Intervallo PR</h3>
+
+          <div class="exam-grid">
+            ${optionButton(examId,'prMode','normal','Normale',state.prMode)}
+            ${optionButton(examId,'prMode','prolonged','Allungato',state.prMode)}
+            ${optionButton(examId,'prMode','shortened','Accorciato',state.prMode)}
+            ${optionButton(examId,'prMode','variable','Variabile',state.prMode)}
+          </div>
+
+          <div class="grid" style="margin-top:16px">
+            <label>PR (ms)
+              <input inputmode="decimal"
+                value="${esc(state.prValue)}"
+                data-ecg-input="${examId}"
+                data-field="prValue"
+                placeholder="es. 100">
+            </label>
+          </div>
+
+          ${state.prMode==='prolonged'?`
+            <div class="notice">
+              PR allungato: il reperto può essere compatibile con blocco atrioventricolare di I grado.
+            </div>
+          `:''}
         </div>
       `:''}
     `).join('')}
@@ -890,7 +947,9 @@ function bind(){
           qrsMode:state.qrsMode,
           qrsFindings:state.qrsFindings,
           qrsDuration:state.qrsDuration,
-          qrsAmplitude:state.qrsAmplitude
+          qrsAmplitude:state.qrsAmplitude,
+          prMode:state.prMode,
+          prValue:state.prValue
         },
         description:state.description||null,
         interpretation:state.interpretation||null,
