@@ -283,6 +283,9 @@ function getEcgState(examId,exam=null){
       axisValue:saved.axisValue||'',
       axisDecision:saved.axisDecision||'',
       diagnosisManual:saved.diagnosisManual||'',
+      diagnosisFinal:saved.diagnosisFinal||saved.diagnosisManual||'',
+      diagnosisConfidence:saved.diagnosisConfidence||'',
+      diagnosisSource:saved.diagnosisSource||'',
       diagnosisReviewed:saved.diagnosisReviewed||'',
       description:exam?.description||saved.description||'',
       interpretation:exam?.interpretation||saved.interpretation||'',
@@ -905,10 +908,14 @@ function buildDiagnosisItems(state,species=''){
   return [...new Set(items)];
 }
 
+function automaticDiagnosisText(state,species=''){
+  return buildDiagnosisItems(state,species).join(' ');
+}
+
 function diagnosisDot(state,species=''){
   const items=buildDiagnosisItems(state,species);
   if(state.diagnosisReviewed==='confirmed') return '🟢';
-  if(items.length||state.diagnosisManual) return '🟠';
+  if(items.length||state.diagnosisFinal||state.diagnosisManual) return '🟠';
   return '⚪';
 }
 
@@ -951,8 +958,9 @@ function buildEcgInterpretation(state,species=''){
     parts.push(`Valore dell’asse elettrico suggestivo ma non conclusivo: ${axis.sentence.charAt(0).toLowerCase()+axis.sentence.slice(1)}`);
   }
 
-  if(state.diagnosisManual&&String(state.diagnosisManual).trim()){
-    parts.push(String(state.diagnosisManual).trim());
+  if(state.diagnosisFinal&&String(state.diagnosisFinal).trim()){
+    const finalText=String(state.diagnosisFinal).trim();
+    if(!parts.includes(finalText)) parts.push(finalText);
   }
 
   return [...new Set(parts)].join(' ');
@@ -1458,42 +1466,67 @@ function ecgView(examId){
             <div class="notice">Nel referto verrà indicato che l’asse elettrico medio del QRS non è valutabile.</div>
           `:''}
         </div>
+      `:''}
 
       ${state.openStep===key&&key==='diagnosi'?`
         <div class="card" style="margin:12px 0">
           <h3>Diagnosi ECG</h3>
-          <p class="meta">VetCardio raccoglie qui le interpretazioni già confermate e i reperti strutturati. La diagnosi finale resta sempre modificabile da te.</p>
+          <p class="meta">VetCardio riunisce i reperti già inseriti e confermati. La formulazione finale resta sempre sotto il tuo controllo.</p>
 
           ${(()=>{
             const items=buildDiagnosisItems(state,p.species);
-            if(!items.length) return `<div class="notice">Non sono ancora presenti elementi sufficienti per proporre una diagnosi ECG strutturata.</div>`;
+            if(!items.length){
+              return `<div class="notice">
+                Non sono ancora presenti elementi sufficienti per formulare una diagnosi automatica.
+              </div>`;
+            }
             return `<div class="notice">
-              <b>Riepilogo proposto</b>
+              <b>Diagnosi automatica proposta</b>
               <div style="margin-top:10px">
-                ${items.map(item=>`<div style="margin:6px 0">• ${esc(item)}</div>`).join('')}
+                ${items.map(item=>`<div style="margin:7px 0">• ${esc(item)}</div>`).join('')}
               </div>
             </div>`;
           })()}
 
+          <div style="margin-top:16px">
+            <button type="button"
+              class="secondary"
+              data-copy-auto-diagnosis="${examId}">
+              Usa la proposta come diagnosi finale
+            </button>
+          </div>
+
           <label style="display:block;margin-top:16px">
-            Diagnosi aggiuntiva o correzione manuale
-            <textarea rows="4"
+            Diagnosi finale
+            <textarea rows="5"
               data-ecg-text="${examId}"
-              data-field="diagnosisManual"
-              placeholder="Aggiungi una diagnosi non proposta oppure specifica meglio il reperto...">${esc(state.diagnosisManual)}</textarea>
+              data-field="diagnosisFinal"
+              placeholder="Scrivi o modifica qui la diagnosi ECG finale...">${esc(state.diagnosisFinal)}</textarea>
           </label>
 
-          <p><b>Revisione della diagnosi</b></p>
+          <p><b>Livello di confidenza</b></p>
+          <div class="exam-grid">
+            ${optionButton(examId,'diagnosisConfidence','high','Alta',state.diagnosisConfidence)}
+            ${optionButton(examId,'diagnosisConfidence','medium','Media',state.diagnosisConfidence)}
+            ${optionButton(examId,'diagnosisConfidence','low','Bassa',state.diagnosisConfidence)}
+          </div>
+
+          <p><b>Origine della diagnosi finale</b></p>
+          <div class="exam-grid">
+            ${optionButton(examId,'diagnosisSource','automatic','Confermo la proposta',state.diagnosisSource)}
+            ${optionButton(examId,'diagnosisSource','manual','Modificata manualmente',state.diagnosisSource)}
+          </div>
+
+          <p><b>Stato della revisione</b></p>
           <div class="exam-grid">
             ${optionButton(examId,'diagnosisReviewed','confirmed','Diagnosi revisionata',state.diagnosisReviewed)}
             ${optionButton(examId,'diagnosisReviewed','to_review','Da rivedere',state.diagnosisReviewed)}
           </div>
 
           <div class="notice" style="margin-top:14px">
-            Questa sezione non assegna automaticamente gravità o terapia. Il prossimo modulo sarà dedicato alle raccomandazioni cliniche.
+            Questa sezione non assegna automaticamente gravità, prognosi o terapia.
           </div>
         </div>
-      `:''}
       `:''}
     `).join('')}
   </section>
@@ -1789,6 +1822,8 @@ function bind(){
         || b.dataset.field==='axisPosition'
         || b.dataset.field==='axisDecision'
         || b.dataset.field==='diagnosisReviewed'
+        || b.dataset.field==='diagnosisConfidence'
+        || b.dataset.field==='diagnosisSource'
         || wanderingSuggested(state)
         || bav1Suggested(state)
         || bav2Suggested(state)
@@ -1822,7 +1857,9 @@ function bind(){
     t.oninput=()=>{
       const state=getEcgState(t.dataset.ecgText);
       state[t.dataset.field]=t.value;
-      if(t.dataset.field==='diagnosisManual'){
+      if(t.dataset.field==='diagnosisFinal'){
+        state.diagnosisSource='manual';
+        state.diagnosisReviewed='to_review';
         state.interpretation=buildEcgInterpretation(state,speciesForExam(t.dataset.ecgText));
       }
       state.saved=false;
@@ -1890,6 +1927,22 @@ function bind(){
     svg.onpointercancel=()=>{ dragging=false; };
   });
 
+
+  document.querySelectorAll('[data-copy-auto-diagnosis]').forEach(button=>{
+    button.onclick=()=>{
+      const examId=button.dataset.copyAutoDiagnosis;
+      const state=getEcgState(examId);
+      const proposed=automaticDiagnosisText(state,speciesForExam(examId));
+      if(!proposed) return;
+      state.diagnosisFinal=proposed;
+      state.diagnosisSource='automatic';
+      state.diagnosisReviewed='to_review';
+      state.interpretation=buildEcgInterpretation(state,speciesForExam(examId));
+      state.saved=false;
+      render();
+    };
+  });
+
   document.querySelectorAll('[data-save-ecg]').forEach(b=>{
     b.onclick=async()=>{
       const examId=b.dataset.saveEcg;
@@ -1941,6 +1994,9 @@ function bind(){
           axisValue:state.axisValue,
           axisDecision:state.axisDecision,
           diagnosisManual:state.diagnosisManual,
+          diagnosisFinal:state.diagnosisFinal,
+          diagnosisConfidence:state.diagnosisConfidence,
+          diagnosisSource:state.diagnosisSource,
           diagnosisReviewed:state.diagnosisReviewed
         },
         description:state.description||null,
