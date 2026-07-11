@@ -242,6 +242,10 @@ function getEcgState(examId,exam=null){
       pWaveFindings:Array.isArray(saved.pWaveFindings)?saved.pWaveFindings:[],
       pWaveDuration:normalizePWaveDurationMs(saved.pWaveDuration),
       pWaveAmplitude:saved.pWaveAmplitude||'',
+      qrsMode:saved.qrsMode||'',
+      qrsFindings:Array.isArray(saved.qrsFindings)?saved.qrsFindings:[],
+      qrsDuration:saved.qrsDuration||'',
+      qrsAmplitude:saved.qrsAmplitude||'',
       description:exam?.description||saved.description||'',
       interpretation:exam?.interpretation||saved.interpretation||'',
       recommendations:exam?.recommendations||saved.recommendations||'',
@@ -321,6 +325,21 @@ function buildEcgDescription(state){
   if(state.pWaveAmplitude) measures.push(`ampiezza ${state.pWaveAmplitude} mV`);
   if(measures.length) parts.push(`Misure dell’onda P: ${measures.join(', ')}.`);
 
+  if(state.qrsMode==='normal'){
+    parts.push('Complessi QRS nei limiti della norma.');
+  }else if(state.qrsMode==='detail'){
+    if(state.qrsFindings.length){
+      parts.push(`Complessi QRS ${state.qrsFindings.map(qrsFindingLabel).join(', ')}.`);
+    }else{
+      parts.push('Complessi QRS da approfondire.');
+    }
+  }
+
+  const qrsMeasures=[];
+  if(state.qrsDuration) qrsMeasures.push(`durata ${state.qrsDuration} ms`);
+  if(state.qrsAmplitude) qrsMeasures.push(`ampiezza ${state.qrsAmplitude} mV`);
+  if(qrsMeasures.length) parts.push(`Misure del QRS: ${qrsMeasures.join(', ')}.`);
+
   return parts.join(' ');
 }
 
@@ -350,6 +369,25 @@ function pWaveDot(state){
   if(state.pWaveMode==='normal') return '🟢';
   if(state.pWaveMode==='detail'&&state.pWaveFindings.length) return '🟠';
   if(state.pWaveMode==='detail') return '🟠';
+  return '⚪';
+}
+
+function qrsFindingLabel(value){
+  return ({
+    durata_aumentata:'aumentato in durata',
+    ampiezza_aumentata:'aumentato in ampiezza',
+    bassa_ampiezza:'di bassa ampiezza',
+    morfologia_aberrante:'di morfologia aberrante',
+    blocco_branca_destra:'compatibile con blocco di branca destra',
+    blocco_branca_sinistra:'compatibile con blocco di branca sinistra',
+    variabile:'variabile',
+    altro:'con altra alterazione'
+  })[value]||value;
+}
+
+function qrsDot(state){
+  if(state.qrsMode==='normal') return '🟢';
+  if(state.qrsMode==='detail') return '🟠';
   return '⚪';
 }
 
@@ -388,7 +426,7 @@ function ecgView(examId){
     ['FC','Frequenza cardiaca',fcDot(state),'fc'],
     ['Ritmo','Origine e regolarità',rhythmDot(state),'ritmo'],
     ['Onda P','Morfologia e misure',pWaveDot(state),'onda-p'],
-    ['QRS','Morfologia, durata e ampiezza','⚪','qrs'],
+    ['QRS','Morfologia, durata e ampiezza',qrsDot(state),'qrs'],
     ['PR','Intervallo PR','⚪','pr'],
     ['Conduzione','Disturbi della conduzione','⚪','conduzione'],
     ['Extrasistoli','Battiti ectopici','⚪','extrasistoli'],
@@ -513,6 +551,48 @@ function ecgView(examId){
                 data-ecg-input="${examId}"
                 data-field="pWaveAmplitude"
                 placeholder="es. 0,3">
+            </label>
+          </div>
+        </div>
+      `:''}
+
+      ${state.openStep===key&&key==='qrs'?`
+        <div class="card" style="margin:12px 0">
+          <h3>QRS</h3>
+
+          <div class="exam-grid">
+            ${optionButton(examId,'qrsMode','normal','Normale',state.qrsMode)}
+            ${optionButton(examId,'qrsMode','detail','Approfondisci',state.qrsMode)}
+          </div>
+
+          ${state.qrsMode==='detail'?`
+            <p><b>Alterazioni rilevate</b></p>
+            <div class="exam-grid">
+              ${toggleButton(examId,'qrsFindings','durata_aumentata','Aumentato in durata',state.qrsFindings)}
+              ${toggleButton(examId,'qrsFindings','ampiezza_aumentata','Aumentato in ampiezza',state.qrsFindings)}
+              ${toggleButton(examId,'qrsFindings','bassa_ampiezza','Bassa ampiezza',state.qrsFindings)}
+              ${toggleButton(examId,'qrsFindings','morfologia_aberrante','Morfologia aberrante',state.qrsFindings)}
+              ${toggleButton(examId,'qrsFindings','blocco_branca_destra','Blocco di branca destra',state.qrsFindings)}
+              ${toggleButton(examId,'qrsFindings','blocco_branca_sinistra','Blocco di branca sinistra',state.qrsFindings)}
+              ${toggleButton(examId,'qrsFindings','variabile','Variabile',state.qrsFindings)}
+              ${toggleButton(examId,'qrsFindings','altro','Altro',state.qrsFindings)}
+            </div>
+          `:''}
+
+          <div class="grid" style="margin-top:16px">
+            <label>Durata QRS (ms)
+              <input inputmode="decimal"
+                value="${esc(state.qrsDuration)}"
+                data-ecg-input="${examId}"
+                data-field="qrsDuration"
+                placeholder="es. 60">
+            </label>
+            <label>Ampiezza QRS (mV)
+              <input inputmode="decimal"
+                value="${esc(state.qrsAmplitude)}"
+                data-ecg-input="${examId}"
+                data-field="qrsAmplitude"
+                placeholder="es. 2,5">
             </label>
           </div>
         </div>
@@ -806,7 +886,11 @@ function bind(){
           pWaveMode:state.pWaveMode,
           pWaveFindings:state.pWaveFindings,
           pWaveDuration:state.pWaveDuration,
-          pWaveAmplitude:state.pWaveAmplitude
+          pWaveAmplitude:state.pWaveAmplitude,
+          qrsMode:state.qrsMode,
+          qrsFindings:state.qrsFindings,
+          qrsDuration:state.qrsDuration,
+          qrsAmplitude:state.qrsAmplitude
         },
         description:state.description||null,
         interpretation:state.interpretation||null,
