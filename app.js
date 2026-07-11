@@ -273,6 +273,10 @@ function getEcgState(examId,exam=null){
       tWavePolarity:saved.tWavePolarity||'',
       tWaveFindings:Array.isArray(saved.tWaveFindings)?saved.tWaveFindings:[],
       tWaveAmplitude:saved.tWaveAmplitude||'',
+      qtMode:saved.qtMode||'',
+      qtValue:saved.qtValue||'',
+      qtcValue:saved.qtcValue||'',
+      qtcFormula:saved.qtcFormula||'',
       description:exam?.description||saved.description||'',
       interpretation:exam?.interpretation||saved.interpretation||'',
       recommendations:exam?.recommendations||saved.recommendations||'',
@@ -414,6 +418,24 @@ function buildEcgDescription(state){
     if(findings.length) sentence+=`${state.tWaveMorphology||polarity?', ': ' '}${findings.join(', ')}`;
     if(state.tWaveAmplitude) sentence+=` (ampiezza ${String(state.tWaveAmplitude).replace('.',',')} mV)`;
     parts.push(sentence+'.');
+  }
+
+  if(state.qtMode){
+    const label=qtLabel(state.qtMode);
+    if(state.qtMode==='not_evaluable'){
+      parts.push('Intervallo QT non valutabile.');
+    }else if(state.qtValue){
+      parts.push(`Intervallo QT ${label}, pari a ${String(state.qtValue).replace('.',',')} ms.`);
+    }else{
+      parts.push(`Intervallo QT ${label}.`);
+    }
+  }else if(state.qtValue){
+    parts.push(`Intervallo QT pari a ${String(state.qtValue).replace('.',',')} ms.`);
+  }
+
+  if(state.qtcValue){
+    const formula=qtcFormulaLabel(state.qtcFormula);
+    parts.push(`QT corretto pari a ${String(state.qtcValue).replace('.',',')} ms${formula?` secondo ${formula}`:''}.`);
   }
 
   return parts.join(' ');
@@ -585,6 +607,30 @@ function tWaveDot(state){
   return '🟠';
 }
 
+function qtLabel(value){
+  return ({
+    normal:'nei limiti della norma',
+    prolonged:'allungato',
+    shortened:'accorciato',
+    not_evaluable:'non valutabile'
+  })[value]||'';
+}
+
+function qtcFormulaLabel(value){
+  return ({
+    bazett:'Bazett',
+    fridericia:'Fridericia',
+    other:'altra formula'
+  })[value]||'';
+}
+
+function qtDot(state){
+  if(state.qtMode==='normal') return '🟢';
+  if(state.qtMode) return '🟠';
+  if(state.qtValue||state.qtcValue) return '🟠';
+  return '⚪';
+}
+
 function decisionLabel(value){
   return ({
     confirm:'Confermo',
@@ -668,7 +714,7 @@ function ecgView(examId){
     ['Conduzione','Disturbi della conduzione',conductionDot(state),'conduzione'],
     ['Extrasistoli','Battiti ectopici',ectopyDot(state),'extrasistoli'],
     ['Onda T','Morfologia dell’onda T',tWaveDot(state),'onda-t'],
-    ['QT','Intervallo QT','⚪','qt'],
+    ['QT','Intervallo QT',qtDot(state),'qt'],
     ['Asse','Asse elettrico','⚪','asse'],
     ['Diagnosi','Interpretazione elettrocardiografica','⚪','diagnosi'],
     ['Raccomandazioni','Approfondimenti consigliati','⚪','raccomandazioni']
@@ -1015,6 +1061,50 @@ function ecgView(examId){
           </div>
 
           <p class="meta">La polarità positiva, negativa o bifasica può essere fisiologica nel cane; il segmento ST e la morfologia complessiva hanno maggiore peso interpretativo.</p>
+        </div>
+      `:''}
+
+      ${state.openStep===key&&key==='qt'?`
+        <div class="card" style="margin:12px 0">
+          <h3>Intervallo QT</h3>
+
+          <div class="exam-grid">
+            ${optionButton(examId,'qtMode','normal','Normale',state.qtMode)}
+            ${optionButton(examId,'qtMode','prolonged','Allungato',state.qtMode)}
+            ${optionButton(examId,'qtMode','shortened','Accorciato',state.qtMode)}
+            ${optionButton(examId,'qtMode','not_evaluable','Non valutabile',state.qtMode)}
+          </div>
+
+          <div class="grid" style="margin-top:16px">
+            <label>QT misurato (ms)
+              <input inputmode="decimal"
+                value="${esc(state.qtValue)}"
+                data-ecg-input="${examId}"
+                data-field="qtValue"
+                placeholder="es. 220">
+            </label>
+
+            <label>QT corretto / QTc (ms) — facoltativo
+              <input inputmode="decimal"
+                value="${esc(state.qtcValue)}"
+                data-ecg-input="${examId}"
+                data-field="qtcValue"
+                placeholder="es. 240">
+            </label>
+          </div>
+
+          ${state.qtcValue?`
+            <p><b>Formula QTc</b></p>
+            <div class="exam-grid">
+              ${optionButton(examId,'qtcFormula','bazett','Bazett',state.qtcFormula)}
+              ${optionButton(examId,'qtcFormula','fridericia','Fridericia',state.qtcFormula)}
+              ${optionButton(examId,'qtcFormula','other','Altra',state.qtcFormula)}
+            </div>
+          `:''}
+
+          <div class="notice">
+            L’interpretazione del QT dipende dalla frequenza cardiaca. VetCardio non assegna automaticamente normalità o alterazione in base al solo valore numerico.
+          </div>
         </div>
       `:''}
     `).join('')}
@@ -1393,7 +1483,11 @@ function bind(){
           tWaveMorphology:state.tWaveMorphology,
           tWavePolarity:state.tWavePolarity,
           tWaveFindings:state.tWaveFindings,
-          tWaveAmplitude:state.tWaveAmplitude
+          tWaveAmplitude:state.tWaveAmplitude,
+          qtMode:state.qtMode,
+          qtValue:state.qtValue,
+          qtcValue:state.qtcValue,
+          qtcFormula:state.qtcFormula
         },
         description:state.description||null,
         interpretation:state.interpretation||null,
