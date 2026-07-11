@@ -228,6 +228,15 @@ function normalizePWaveDurationMs(value){
   return raw;
 }
 
+function normalizePrMode(value){
+  return ({
+    normal:'normal_constant',
+    prolonged:'prolonged_constant',
+    shortened:'shortened_constant',
+    variable:'variable_nonprogressive'
+  })[value]||value||'';
+}
+
 function getEcgState(examId,exam=null){
   if(!ecgUi[examId]){
     const saved=exam?.report_data||{};
@@ -246,7 +255,7 @@ function getEcgState(examId,exam=null){
       qrsFindings:Array.isArray(saved.qrsFindings)?saved.qrsFindings:[],
       qrsDuration:saved.qrsDuration||'',
       qrsAmplitude:saved.qrsAmplitude||'',
-      prMode:saved.prMode||'',
+      prMode:normalizePrMode(saved.prMode),
       prValue:saved.prValue||'',
       wanderingDecision:saved.wanderingDecision||'',
       bav1Decision:saved.bav1Decision||'',
@@ -349,7 +358,9 @@ function buildEcgDescription(state){
 
   if(state.prMode){
     const label=prLabel(state.prMode);
-    if(state.prValue){
+    if(state.prMode==='not_evaluable'){
+      parts.push('Intervallo PR non valutabile.');
+    }else if(state.prValue){
       parts.push(`Intervallo PR ${label}, pari a ${state.prValue} ms.`);
     }else{
       parts.push(`Intervallo PR ${label}.`);
@@ -411,15 +422,17 @@ function qrsDot(state){
 
 function prLabel(value){
   return ({
-    normal:'nei limiti della norma',
-    prolonged:'allungato',
-    shortened:'accorciato',
-    variable:'variabile'
+    normal_constant:'normale e costante nei battiti condotti',
+    prolonged_constant:'allungato e costante nei battiti condotti',
+    shortened_constant:'accorciato e costante nei battiti condotti',
+    progressive:'progressivamente allungato nei battiti condotti',
+    variable_nonprogressive:'variabile senza andamento progressivo nei battiti condotti',
+    not_evaluable:'non valutabile'
   })[value]||'';
 }
 
 function prDot(state){
-  if(state.prMode==='normal') return '🟢';
+  if(state.prMode==='normal_constant') return '🟢';
   if(state.prMode) return '🟠';
   return '⚪';
 }
@@ -428,13 +441,13 @@ function wanderingSuggested(state){
   return state.rhythmOrigin==='sinusale'
     && state.rhythmRegularity==='regolarmente_irregolare'
     && state.pWaveFindings.includes('variabile')
-    && state.prMode==='variable';
+    && state.prMode==='variable_nonprogressive';
 }
 
 function bav1Suggested(state){
   return state.pToQrs==='yes'
     && state.qrsToP==='yes'
-    && state.prMode==='prolonged';
+    && state.prMode==='prolonged_constant';
 }
 
 function bav2Suggested(state){
@@ -713,26 +726,42 @@ function ecgView(examId){
         <div class="card" style="margin:12px 0">
           <h3>Intervallo PR</h3>
 
+          <p class="meta">Valuta l’intervallo PR esclusivamente nei battiti condotti.</p>
+
           <div class="exam-grid">
-            ${optionButton(examId,'prMode','normal','Normale',state.prMode)}
-            ${optionButton(examId,'prMode','prolonged','Allungato',state.prMode)}
-            ${optionButton(examId,'prMode','shortened','Accorciato',state.prMode)}
-            ${optionButton(examId,'prMode','variable','Variabile',state.prMode)}
+            ${optionButton(examId,'prMode','normal_constant','Normale e costante',state.prMode)}
+            ${optionButton(examId,'prMode','prolonged_constant','Allungato e costante',state.prMode)}
+            ${optionButton(examId,'prMode','shortened_constant','Accorciato e costante',state.prMode)}
+            ${optionButton(examId,'prMode','progressive','Progressivamente allungato',state.prMode)}
+            ${optionButton(examId,'prMode','variable_nonprogressive','Variabile non progressivo',state.prMode)}
+            ${optionButton(examId,'prMode','not_evaluable','Non valutabile',state.prMode)}
           </div>
 
           <div class="grid" style="margin-top:16px">
-            <label>PR (ms)
+            <label>PR nei battiti condotti (ms)
               <input inputmode="decimal"
                 value="${esc(state.prValue)}"
                 data-ecg-input="${examId}"
                 data-field="prValue"
-                placeholder="es. 100">
+                placeholder="es. 100 oppure 80–120">
             </label>
           </div>
 
-          ${state.prMode==='prolonged'?`
+          ${state.prMode==='prolonged_constant'&&state.pToQrs==='yes'?`
             <div class="notice">
-              PR allungato: il reperto può essere compatibile con blocco atrioventricolare di I grado.
+              PR costantemente allungato con conduzione 1:1: reperto compatibile con blocco atrioventricolare di I grado.
+            </div>
+          `:''}
+
+          ${state.prMode==='progressive'&&state.pToQrs==='no'?`
+            <div class="notice">
+              Progressivo allungamento del PR prima di una P non condotta: reperto suggestivo per BAV di II grado Mobitz I.
+            </div>
+          `:''}
+
+          ${(state.prMode==='normal_constant'||state.prMode==='prolonged_constant')&&state.pToQrs==='no'?`
+            <div class="notice">
+              PR costante nei battiti condotti con onde P non condotte: reperto compatibile con BAV di II grado; il sottotipo va confermato nel modulo Conduzione.
             </div>
           `:''}
         </div>
@@ -801,6 +830,9 @@ function ecgView(examId){
         <div class="notice">
           <b>Possibile BAV di II grado</b><br>
           Non tutte le onde P sono seguite da un QRS, mentre i QRS risultano preceduti da onda P.
+          ${state.prMode?`<br>PR nei battiti condotti: <b>${esc(prLabel(state.prMode))}</b>${state.prValue?` (${esc(state.prValue)} ms)`:''}.`:''}
+          ${state.prMode==='progressive'?'<br>Il comportamento del PR è suggestivo per Mobitz I.':''}
+          ${(state.prMode==='normal_constant'||state.prMode==='prolonged_constant')?'<br>Il PR è costante nei battiti condotti; il reperto può essere compatibile con Mobitz II, da confermare sul tracciato.':''}
           ${state.bav2Subtype?`<br>Tipo selezionato: <b>${esc(bav2SubtypeLabel(state.bav2Subtype))}</b>.`:''}
           <p><b>Sei d’accordo con questa interpretazione?</b></p>
           <div class="exam-grid">
