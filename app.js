@@ -286,6 +286,8 @@ function getEcgState(examId,exam=null){
       diagnosisFinal:saved.diagnosisFinal||saved.diagnosisManual||'',
       diagnosisType:saved.diagnosisType||'',
       diagnosisReviewed:saved.diagnosisReviewed||'',
+      recommendationSelections:Array.isArray(saved.recommendationSelections)?saved.recommendationSelections:[],
+      recommendationText:saved.recommendationText||'',
       description:exam?.description||saved.description||'',
       interpretation:exam?.interpretation||saved.interpretation||'',
       recommendations:exam?.recommendations||saved.recommendations||'',
@@ -1104,6 +1106,117 @@ function consistencyDot(state,species=''){
   return '🟡';
 }
 
+function recommendationLabel(code){
+  return ({
+    echocardiography:'Ecocardiografia',
+    ecg_control:'ECG di controllo',
+    holter:'Holter 24 ore',
+    atropine_test:'Test all’atropina',
+    continuous_ecg:'Monitoraggio ECG continuo',
+    electrolytes:'Elettroliti',
+    troponin:'Troponina cardiaca',
+    blood_gas:'Emogasanalisi',
+    blood_pressure:'Pressione arteriosa',
+    thoracic_xrays:'Radiografie toraciche',
+    cardiology_consult:'Consulenza cardiologica',
+    hospitalization:'Ricovero e monitoraggio',
+    none:'Nessun ulteriore approfondimento'
+  })[code]||code;
+}
+
+function buildAutomaticRecommendations(state,species=''){
+  const codes=clinicalFindingCodes(state,species);
+  const suggested=new Set();
+
+  if(codes.has('av_block_1')){
+    suggested.add('ecg_control');
+  }
+
+  if(codes.has('av_block_2')){
+    suggested.add('echocardiography');
+    suggested.add('atropine_test');
+  }
+
+  if(codes.has('complete_av_block')||codes.has('advanced_av_block')){
+    suggested.add('echocardiography');
+    suggested.add('hospitalization');
+    suggested.add('continuous_ecg');
+  }
+
+  if(codes.has('ventricular_ectopy')){
+    suggested.add('echocardiography');
+
+    const patterns=Array.isArray(state.ectopyPatterns)?state.ectopyPatterns:[];
+    const frequentPattern=
+      patterns.includes('couplets') ||
+      patterns.includes('triplets') ||
+      patterns.includes('runs') ||
+      patterns.includes('bigeminy') ||
+      patterns.includes('trigeminy') ||
+      state.ectopyMorphology==='polymorphic';
+
+    if(frequentPattern){
+      suggested.add('holter');
+      suggested.add('electrolytes');
+    }
+  }
+
+  if(codes.has('prolonged_qt')){
+    suggested.add('electrolytes');
+  }
+
+  if(
+    state.stSegment==='elevated' ||
+    state.stSegment==='depressed' ||
+    state.tWaveMorphology==='altered'
+  ){
+    suggested.add('echocardiography');
+    suggested.add('troponin');
+  }
+
+  const autoDiagnosis=buildAutomaticDiagnosis(state,species);
+  if(autoDiagnosis.summary==='ECG nei limiti della norma.'){
+    suggested.add('none');
+  }
+
+  if(suggested.size>1&&suggested.has('none')){
+    suggested.delete('none');
+  }
+
+  return [...suggested];
+}
+
+function buildRecommendationText(selections){
+  const selected=(Array.isArray(selections)?selections:[])
+    .filter(Boolean);
+
+  if(!selected.length) return '';
+
+  if(selected.includes('none')){
+    return 'Sulla base del solo esame elettrocardiografico non si ritengono necessari ulteriori approfondimenti.';
+  }
+
+  const labels=selected.map(recommendationLabel);
+  let joined='';
+  if(labels.length===1){
+    joined=labels[0];
+  }else if(labels.length===2){
+    joined=`${labels[0]} e ${labels[1]}`;
+  }else{
+    joined=`${labels.slice(0,-1).join(', ')} e ${labels[labels.length-1]}`;
+  }
+
+  return `Si consiglia l’esecuzione di ${joined} al fine di approfondire i reperti elettrocardiografici rilevati.`;
+}
+
+function recommendationsDot(state,species=''){
+  const auto=buildAutomaticRecommendations(state,species);
+  const selected=Array.isArray(state.recommendationSelections)?state.recommendationSelections:[];
+  if(selected.length) return '🟢';
+  if(auto.length) return '🟠';
+  return '⚪';
+}
+
 function diagnosisDot(state,species=''){
   const items=buildDiagnosisItems(state,species);
   if(state.diagnosisReviewed==='confirmed') return '🟢';
@@ -1202,7 +1315,7 @@ function ecgView(examId){
     ['Asse','Asse elettrico',axisDot(state,p.species),'asse'],
     ['Diagnosi','Interpretazione elettrocardiografica',diagnosisDot(state,p.species),'diagnosi'],
     ['Coerenza','Controllo di coerenza ECG',consistencyDot(state,p.species),'coerenza'],
-    ['Raccomandazioni','Approfondimenti consigliati','⚪','raccomandazioni']
+    ['Raccomandazioni','Approfondimenti consigliati',recommendationsDot(state,p.species),'raccomandazioni']
   ];
 
   return `<section class="card">
@@ -1746,6 +1859,73 @@ function ecgView(examId){
           })()}
         </div>
       `:''}
+
+      ${state.openStep===key&&key==='raccomandazioni'?`
+        <div class="card" style="margin:12px 0">
+          <h3>Raccomandazioni</h3>
+          <p class="meta">VetCardio propone gli approfondimenti sulla base dei reperti confermati. Puoi aggiungere o rimuovere liberamente qualsiasi voce.</p>
+
+          ${(()=>{
+            const auto=buildAutomaticRecommendations(state,p.species);
+            if(!auto.length){
+              return `<div class="notice">
+                Nessuna raccomandazione automatica disponibile sulla base dei dati attualmente inseriti.
+              </div>`;
+            }
+            return `<div class="notice">
+              <b>VetCardio suggerisce</b>
+              <div style="margin-top:10px">
+                ${auto.map(code=>`<div style="margin:7px 0">• ${esc(recommendationLabel(code))}</div>`).join('')}
+              </div>
+              <button type="button" class="secondary" style="margin-top:12px"
+                data-apply-auto-recommendations="${examId}">
+                Applica i suggerimenti
+              </button>
+            </div>`;
+          })()}
+
+          <p><b>Cardiologia</b></p>
+          <div class="exam-grid">
+            ${toggleButton(examId,'recommendationSelections','echocardiography','Ecocardiografia',state.recommendationSelections)}
+            ${toggleButton(examId,'recommendationSelections','ecg_control','ECG di controllo',state.recommendationSelections)}
+            ${toggleButton(examId,'recommendationSelections','holter','Holter 24 ore',state.recommendationSelections)}
+            ${toggleButton(examId,'recommendationSelections','atropine_test','Test all’atropina',state.recommendationSelections)}
+            ${toggleButton(examId,'recommendationSelections','continuous_ecg','Monitoraggio ECG continuo',state.recommendationSelections)}
+          </div>
+
+          <p><b>Laboratorio</b></p>
+          <div class="exam-grid">
+            ${toggleButton(examId,'recommendationSelections','electrolytes','Elettroliti',state.recommendationSelections)}
+            ${toggleButton(examId,'recommendationSelections','troponin','Troponina cardiaca',state.recommendationSelections)}
+            ${toggleButton(examId,'recommendationSelections','blood_gas','Emogasanalisi',state.recommendationSelections)}
+          </div>
+
+          <p><b>Diagnostica</b></p>
+          <div class="exam-grid">
+            ${toggleButton(examId,'recommendationSelections','blood_pressure','Pressione arteriosa',state.recommendationSelections)}
+            ${toggleButton(examId,'recommendationSelections','thoracic_xrays','Radiografie toraciche',state.recommendationSelections)}
+          </div>
+
+          <p><b>Gestione</b></p>
+          <div class="exam-grid">
+            ${toggleButton(examId,'recommendationSelections','cardiology_consult','Consulenza cardiologica',state.recommendationSelections)}
+            ${toggleButton(examId,'recommendationSelections','hospitalization','Ricovero e monitoraggio',state.recommendationSelections)}
+            ${toggleButton(examId,'recommendationSelections','none','Nessun ulteriore approfondimento',state.recommendationSelections)}
+          </div>
+
+          <label style="display:block;margin-top:16px">
+            Testo delle raccomandazioni
+            <textarea rows="5"
+              data-ecg-text="${examId}"
+              data-field="recommendationText"
+              placeholder="Le raccomandazioni vengono generate automaticamente dalle selezioni...">${esc(state.recommendationText||buildRecommendationText(state.recommendationSelections))}</textarea>
+          </label>
+
+          <div class="notice" style="margin-top:14px">
+            Le raccomandazioni sono suggerimenti clinici modificabili e non sostituiscono il giudizio del veterinario.
+          </div>
+        </div>
+      `:''}
     `).join('')}
   </section>
 
@@ -2064,7 +2244,19 @@ function bind(){
       const index=list.indexOf(value);
       if(index>=0) list.splice(index,1);
       else list.push(value);
+      if(field==='recommendationSelections'){
+        if(value==='none'&&list.includes('none')){
+          list=['none'];
+        }else if(value!=='none'&&list.includes(value)){
+          list=list.filter(x=>x!=='none');
+        }
+      }
+
       state[field]=list;
+
+      if(field==='recommendationSelections'){
+        state.recommendationText=buildRecommendationText(state.recommendationSelections);
+      }
 
       if(field==='pWaveFindings'&&!wanderingSuggested(state)){
         state.wanderingDecision='';
@@ -2166,6 +2358,19 @@ function bind(){
     };
   });
 
+
+  document.querySelectorAll('[data-apply-auto-recommendations]').forEach(button=>{
+    button.onclick=()=>{
+      const examId=button.dataset.applyAutoRecommendations;
+      const state=getEcgState(examId);
+      const auto=buildAutomaticRecommendations(state,speciesForExam(examId));
+      state.recommendationSelections=[...auto];
+      state.recommendationText=buildRecommendationText(state.recommendationSelections);
+      state.saved=false;
+      render();
+    };
+  });
+
   document.querySelectorAll('[data-save-ecg]').forEach(b=>{
     b.onclick=async()=>{
       const examId=b.dataset.saveEcg;
@@ -2219,7 +2424,9 @@ function bind(){
           diagnosisManual:state.diagnosisManual,
           diagnosisFinal:state.diagnosisFinal,
           diagnosisType:state.diagnosisType,
-          diagnosisReviewed:state.diagnosisReviewed
+          diagnosisReviewed:state.diagnosisReviewed,
+          recommendationSelections:state.recommendationSelections,
+          recommendationText:state.recommendationText
         },
         description:state.description||null,
         interpretation:state.interpretation||null,
