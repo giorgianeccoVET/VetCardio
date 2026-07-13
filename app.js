@@ -531,6 +531,8 @@ function prDot(state){
 function wanderingSuggested(state){
   return state.rhythmOrigin==='sinusale'
     && state.rhythmRegularity==='regolarmente_irregolare'
+    && state.pWaveMode==='detail'
+    && Array.isArray(state.pWaveFindings)
     && state.pWaveFindings.includes('variabile');
 }
 
@@ -869,7 +871,7 @@ function buildClinicalFindings(state,species=''){
   };
 
   if(state.rhythmOrigin==='sinusale'){
-    if(state.wanderingDecision==='confirm'){
+    if(wanderingSuggested(state)&&state.wanderingDecision==='confirm'){
       add('wandering_pacemaker','rhythm','Pacemaker migrante',
         'Ritmo sinusale con pacemaker migrante (wandering pacemaker).',true);
     }else{
@@ -1029,11 +1031,6 @@ function buildEcgInterpretation(state,species=''){
     parts.push(axis.sentence);
   }else if(axis&&state.axisDecision==='inconclusive'){
     parts.push(`Valore dell’asse elettrico suggestivo ma non conclusivo: ${axis.sentence.charAt(0).toLowerCase()+axis.sentence.slice(1)}`);
-  }
-
-  if(state.diagnosisFinal&&String(state.diagnosisFinal).trim()){
-    const finalText=String(state.diagnosisFinal).trim();
-    if(!parts.includes(finalText)) parts.push(finalText);
   }
 
   return [...new Set(parts)].join(' ');
@@ -1874,6 +1871,22 @@ function bind(){
       const examId=b.dataset.ecgChoice;
       const state=getEcgState(examId);
       state[b.dataset.field]=b.dataset.value;
+
+      if(
+        b.dataset.field==='rhythmOrigin' ||
+        b.dataset.field==='rhythmRegularity' ||
+        b.dataset.field==='pWaveMode'
+      ){
+        if(!wanderingSuggested(state)){
+          state.wanderingDecision='';
+          state.diagnosisReviewed='to_review';
+        }
+      }
+
+      if(b.dataset.field==='pWaveMode'&&b.dataset.value==='normal'){
+        state.pWaveFindings=[];
+      }
+
       if(b.dataset.field==='axisEvaluability'&&b.dataset.value==='not_evaluable'){
         state.axisDecision='';
       }
@@ -1912,6 +1925,12 @@ function bind(){
       if(index>=0) list.splice(index,1);
       else list.push(value);
       state[field]=list;
+
+      if(field==='pWaveFindings'&&!wanderingSuggested(state)){
+        state.wanderingDecision='';
+        state.diagnosisReviewed='to_review';
+      }
+
       state.description=buildEcgDescription(state);
       state.interpretation=buildEcgInterpretation(state,speciesForExam(examId));
       state.saved=false;
