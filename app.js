@@ -290,6 +290,7 @@ function getEcgState(examId,exam=null){
       recommendationText:saved.recommendationText||'',
       conclusionsText:saved.conclusionsText||'',
       conclusionsEdited:Boolean(saved.conclusionsEdited),
+      reportUpdatedAt:saved.reportUpdatedAt||'',
       description:exam?.description||saved.description||'',
       interpretation:exam?.interpretation||saved.interpretation||'',
       recommendations:exam?.recommendations||saved.recommendations||'',
@@ -1311,6 +1312,41 @@ function conclusionsDot(state,species=''){
   return '⚪';
 }
 
+function buildReportCompleteness(state){
+  const checks=[
+    ['Relazione P–QRS', Boolean(state.pToQrs&&state.qrsToP)],
+    ['Frequenza cardiaca', Boolean(String(state.heartRate||'').trim())],
+    ['Ritmo', Boolean(state.rhythmOrigin&&state.rhythmRegularity)],
+    ['Onda P', Boolean(state.pWaveMode)],
+    ['QRS', Boolean(state.qrsMode)],
+    ['Intervallo PR', Boolean(state.prMode)],
+    ['Conduzione', Boolean(state.conductionMode)],
+    ['Extrasistoli', Boolean(state.ectopyMode)],
+    ['ST–T', Boolean(state.stSegment&&state.tWaveMorphology)],
+    ['QT', Boolean(state.qtMode)],
+    ['Asse elettrico', Boolean(state.axisEvaluability)],
+    ['Interpretazione', Boolean(String(state.interpretation||'').trim())],
+    ['Conclusioni', Boolean(String(state.conclusionsText||'').trim())],
+    ['Raccomandazioni', Boolean(String(state.recommendationText||'').trim() || (state.recommendationSelections||[]).length)]
+  ];
+
+  const completed=checks.filter(([,ok])=>ok).length;
+  const total=checks.length;
+  const percent=Math.round((completed/total)*100);
+  const missing=checks.filter(([,ok])=>!ok).map(([label])=>label);
+
+  return {completed,total,percent,missing};
+}
+
+function buildFinalReport(state,species=''){
+  return {
+    description: buildEcgDescription(state),
+    interpretation: buildEcgInterpretation(state,species),
+    conclusions: buildAutomaticConclusions(state,species),
+    recommendations: buildRecommendationText(state.recommendationSelections)
+  };
+}
+
 function diagnosisDot(state,species=''){
   const items=buildDiagnosisItems(state,species);
   if(state.diagnosisReviewed==='confirmed') return '🟢';
@@ -2117,6 +2153,41 @@ function ecgView(examId){
   `:''}
 
   <section class="card">
+    ${(()=>{
+      const completeness=buildReportCompleteness(state);
+      const status=completeness.percent===100
+        ? '🟢 Referto completo'
+        : completeness.percent>=75
+          ? '🟡 Referto quasi completo'
+          : '🟠 Referto incompleto';
+
+      return `<div class="card" style="margin:18px 0">
+        <h2 style="margin-top:0">Refertazione ECG</h2>
+        <div class="notice">
+          <b>${status}</b>
+          <div style="margin-top:6px">${completeness.percent}% completato</div>
+          ${completeness.missing.length?`
+            <div class="meta" style="margin-top:8px">
+              Mancano: ${completeness.missing.map(esc).join(' · ')}
+            </div>
+          `:''}
+        </div>
+
+        <button type="button"
+          class="primary"
+          style="width:100%;margin-top:14px"
+          data-update-full-report="${examId}">
+          ✨ Aggiorna referto ECG
+        </button>
+
+        ${state.reportUpdatedAt?`
+          <div class="meta" style="margin-top:8px">
+            Ultimo aggiornamento: ${esc(new Date(state.reportUpdatedAt).toLocaleString('it-IT'))}
+          </div>
+        `:''}
+      </div>`;
+    })()}
+
     <h3>Descrizione</h3>
     <p class="meta">Il testo si aggiorna mentre compili.</p>
     <textarea id="ecgDescription" data-ecg-text="${examId}" data-field="description" placeholder="Descrizione ECG">${esc(state.description)}</textarea>
@@ -2504,6 +2575,29 @@ function bind(){
 
 
 
+
+  document.querySelectorAll('[data-update-full-report]').forEach(button=>{
+    button.onclick=()=>{
+      const examId=button.dataset.updateFullReport;
+      const state=getEcgState(examId);
+      const species=speciesForExam(examId);
+      const report=buildFinalReport(state,species);
+
+      state.description=report.description;
+      state.interpretation=report.interpretation;
+      state.conclusionsText=report.conclusions;
+      state.conclusionsEdited=false;
+
+      if(report.recommendations){
+        state.recommendationText=report.recommendations;
+      }
+
+      state.reportUpdatedAt=new Date().toISOString();
+      state.saved=false;
+      render();
+    };
+  });
+
   document.querySelectorAll('[data-update-conclusions]').forEach(button=>{
     button.onclick=()=>{
       const examId=button.dataset.updateConclusions;
@@ -2619,7 +2713,8 @@ function bind(){
           recommendationSelections:state.recommendationSelections,
           recommendationText:state.recommendationText,
           conclusionsText:state.conclusionsText,
-          conclusionsEdited:state.conclusionsEdited
+          conclusionsEdited:state.conclusionsEdited,
+          reportUpdatedAt:state.reportUpdatedAt
         },
         description:state.description||null,
         interpretation:state.interpretation||null,
