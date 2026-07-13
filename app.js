@@ -288,6 +288,8 @@ function getEcgState(examId,exam=null){
       diagnosisReviewed:saved.diagnosisReviewed||'',
       recommendationSelections:Array.isArray(saved.recommendationSelections)?saved.recommendationSelections:[],
       recommendationText:saved.recommendationText||'',
+      conclusionsText:saved.conclusionsText||'',
+      conclusionsEdited:Boolean(saved.conclusionsEdited),
       description:exam?.description||saved.description||'',
       interpretation:exam?.interpretation||saved.interpretation||'',
       recommendations:exam?.recommendations||saved.recommendations||'',
@@ -1217,6 +1219,98 @@ function recommendationsDot(state,species=''){
   return '⚪';
 }
 
+function buildAutomaticConclusions(state,species=''){
+  const findings=buildClinicalFindings(state,species);
+  const codes=new Set(findings.map(f=>f.code));
+  const abnormal=findings.filter(f=>f.abnormal);
+  const autoDiagnosis=buildAutomaticDiagnosis(state,species);
+
+  if(autoDiagnosis.summary==='ECG nei limiti della norma.'){
+    return 'ECG nei limiti della norma. In assenza di segni clinici non si evidenziano alterazioni elettrocardiografiche di rilievo.';
+  }
+
+  const parts=[];
+
+  if(codes.has('wandering_pacemaker')){
+    parts.push('Il pacemaker migrante può rappresentare una variante fisiologica nel cane ed è frequentemente associato a variazioni del tono autonomico.');
+  }
+
+  if(codes.has('av_block_1')){
+    parts.push('Il reperto è compatibile con un ritardo della conduzione atrioventricolare, da interpretare nel contesto clinico del paziente.');
+  }
+
+  if(codes.has('av_block_2')){
+    parts.push('Il reperto è compatibile con un blocco atrioventricolare di II grado e richiede una valutazione clinica integrata per definirne il significato.');
+  }
+
+  if(codes.has('advanced_av_block')){
+    parts.push('È presente un disturbo avanzato della conduzione atrioventricolare, potenzialmente clinicamente rilevante.');
+  }
+
+  if(codes.has('complete_av_block')){
+    parts.push('È presente un blocco atrioventricolare completo con dissociazione atrioventricolare, reperto clinicamente rilevante.');
+  }
+
+  if(codes.has('ventricular_ectopy')){
+    parts.push('La presenza di extrasistolia ventricolare richiede inquadramento nel contesto clinico e cardiologico complessivo.');
+  }
+
+  if(codes.has('supraventricular_ectopy')){
+    parts.push('La presenza di extrasistolia sopraventricolare richiede inquadramento nel contesto clinico e cardiologico complessivo.');
+  }
+
+  if(codes.has('atrial_fibrillation')){
+    parts.push('La fibrillazione atriale richiede valutazione cardiologica completa e caratterizzazione della risposta ventricolare.');
+  }
+
+  if(codes.has('atrial_flutter')){
+    parts.push('Il flutter atriale richiede valutazione cardiologica completa e caratterizzazione della conduzione atrioventricolare.');
+  }
+
+  if(codes.has('prolonged_qt')){
+    parts.push('L’allungamento dell’intervallo QT deve essere interpretato in relazione alla frequenza cardiaca, agli elettroliti e ai farmaci assunti.');
+  }
+
+  if(codes.has('short_qt')){
+    parts.push('L’accorciamento dell’intervallo QT deve essere interpretato nel contesto clinico e metabolico.');
+  }
+
+  if(codes.has('left_axis_deviation')||codes.has('right_axis_deviation')){
+    parts.push('La deviazione dell’asse elettrico deve essere correlata alla posizione di registrazione, alla conformazione toracica e agli eventuali reperti cardiaci strutturali.');
+  }
+
+  if(
+    state.stSegment==='elevated' ||
+    state.stSegment==='depressed' ||
+    state.tWaveMorphology==='altered'
+  ){
+    parts.push('Le alterazioni della ripolarizzazione ventricolare devono essere interpretate nel contesto clinico e metabolico.');
+  }
+
+  if(!parts.length&&abnormal.length){
+    parts.push('I reperti elettrocardiografici rilevati devono essere interpretati nel contesto clinico complessivo del paziente.');
+  }
+
+  const selected=Array.isArray(state.recommendationSelections)
+    ? state.recommendationSelections
+    : [];
+
+  if(selected.length&&!selected.includes('none')){
+    parts.push('Si raccomanda il completamento dell’iter diagnostico secondo gli approfondimenti selezionati.');
+  }else if(selected.includes('none')){
+    parts.push('Sulla base del solo esame elettrocardiografico non si ritengono necessari ulteriori approfondimenti.');
+  }
+
+  return [...new Set(parts)].join(' ');
+}
+
+function conclusionsDot(state,species=''){
+  const generated=buildAutomaticConclusions(state,species);
+  if(state.conclusionsText&&state.conclusionsText.trim()) return '🟢';
+  if(generated) return '🟠';
+  return '⚪';
+}
+
 function diagnosisDot(state,species=''){
   const items=buildDiagnosisItems(state,species);
   if(state.diagnosisReviewed==='confirmed') return '🟢';
@@ -1301,6 +1395,10 @@ function ecgView(examId){
   // Questo aggiorna anche i vecchi testi salvati in secondi, convertendoli in millisecondi.
   if(generated) state.description=generated;
 
+  if(!state.conclusionsEdited&&!state.conclusionsText){
+    state.conclusionsText=buildAutomaticConclusions(state,p.species);
+  }
+
   const steps=[
     ['P-QRS','Relazione tra onde P e complessi QRS',pqrsDot(state),'pqrs'],
     ['FC','Frequenza cardiaca',fcDot(state),'fc'],
@@ -1314,6 +1412,7 @@ function ecgView(examId){
     ['QT','Intervallo QT',qtDot(state),'qt'],
     ['Asse','Asse elettrico',axisDot(state,p.species),'asse'],
     ['Diagnosi','Interpretazione elettrocardiografica',diagnosisDot(state,p.species),'diagnosi'],
+    ['Conclusioni','Sintesi clinica del reperto ECG',conclusionsDot(state,p.species),'conclusioni'],
     ['Coerenza','Controllo di coerenza ECG',consistencyDot(state,p.species),'coerenza'],
     ['Raccomandazioni','Approfondimenti consigliati',recommendationsDot(state,p.species),'raccomandazioni']
   ];
@@ -1824,6 +1923,44 @@ function ecgView(examId){
         </div>
       `:''}
 
+      ${state.openStep===key&&key==='conclusioni'?`
+        <div class="card" style="margin:12px 0">
+          <h3>Conclusioni</h3>
+          <p class="meta">VetCardio genera una sintesi clinica dei reperti ECG. Il testo resta sempre modificabile.</p>
+
+          ${(()=>{
+            const generated=buildAutomaticConclusions(state,p.species);
+            if(!generated){
+              return `<div class="notice">
+                Non sono ancora presenti elementi sufficienti per generare le conclusioni.
+              </div>`;
+            }
+            return `<div class="notice">
+              <b>Conclusioni automatiche proposte</b>
+              <div style="margin-top:10px">${esc(generated)}</div>
+            </div>`;
+          })()}
+
+          <div style="margin-top:16px">
+            <button type="button" class="secondary" data-update-conclusions="${examId}">
+              Aggiorna conclusioni
+            </button>
+          </div>
+
+          <label style="display:block;margin-top:16px">
+            Conclusioni finali
+            <textarea rows="6"
+              data-ecg-text="${examId}"
+              data-field="conclusionsText"
+              placeholder="Le conclusioni verranno generate automaticamente...">${esc(state.conclusionsText||buildAutomaticConclusions(state,p.species))}</textarea>
+          </label>
+
+          <div class="notice" style="margin-top:14px">
+            Le conclusioni rappresentano una sintesi clinica del reperto elettrocardiografico e non sostituiscono l’inquadramento complessivo del paziente.
+          </div>
+        </div>
+      `:''}
+
       ${state.openStep===key&&key==='coerenza'?`
         <div class="card" style="margin:12px 0">
           <h3>Controllo di coerenza ECG</h3>
@@ -1987,8 +2124,11 @@ function ecgView(examId){
     <h3>Interpretazione</h3>
     <textarea data-ecg-text="${examId}" data-field="interpretation" placeholder="Diagnosi elettrocardiografica">${esc(state.interpretation)}</textarea>
 
-    <h3>Conclusioni e raccomandazioni</h3>
-    <textarea data-ecg-text="${examId}" data-field="recommendations" placeholder="Conclusioni e raccomandazioni">${esc(state.recommendations)}</textarea>
+    <h3>Conclusioni</h3>
+    <textarea data-ecg-text="${examId}" data-field="conclusionsText" placeholder="Conclusioni ECG">${esc(state.conclusionsText||buildAutomaticConclusions(state,p.species))}</textarea>
+
+    <h3>Raccomandazioni</h3>
+    <textarea data-ecg-text="${examId}" data-field="recommendationText" placeholder="Approfondimenti consigliati">${esc(state.recommendationText||buildRecommendationText(state.recommendationSelections))}</textarea>
 
     ${state.saved?'<div class="notice success">ECG salvato correttamente.</div>':''}
   </section>
@@ -2278,6 +2418,9 @@ function bind(){
         state.diagnosisReviewed='to_review';
         state.interpretation=buildEcgInterpretation(state,speciesForExam(t.dataset.ecgText));
       }
+      if(t.dataset.field==='conclusionsText'){
+        state.conclusionsEdited=true;
+      }
       state.saved=false;
     };
   });
@@ -2360,6 +2503,18 @@ function bind(){
 
 
 
+
+  document.querySelectorAll('[data-update-conclusions]').forEach(button=>{
+    button.onclick=()=>{
+      const examId=button.dataset.updateConclusions;
+      const state=getEcgState(examId);
+      state.conclusionsText=buildAutomaticConclusions(state,speciesForExam(examId));
+      state.conclusionsEdited=false;
+      state.saved=false;
+      render();
+    };
+  });
+
   document.querySelectorAll('[data-recommendation-toggle]').forEach(button=>{
     button.onclick=()=>{
       const examId=button.dataset.recommendationToggle;
@@ -2384,6 +2539,9 @@ function bind(){
 
       state.recommendationSelections=list;
       state.recommendationText=buildRecommendationText(list);
+      if(!state.conclusionsEdited){
+        state.conclusionsText=buildAutomaticConclusions(state,speciesForExam(examId));
+      }
       state.saved=false;
       render();
     };
@@ -2396,6 +2554,9 @@ function bind(){
       const auto=buildAutomaticRecommendations(state,speciesForExam(examId));
       state.recommendationSelections=[...auto];
       state.recommendationText=buildRecommendationText(state.recommendationSelections);
+      if(!state.conclusionsEdited){
+        state.conclusionsText=buildAutomaticConclusions(state,speciesForExam(examId));
+      }
       state.saved=false;
       render();
     };
@@ -2456,11 +2617,13 @@ function bind(){
           diagnosisType:state.diagnosisType,
           diagnosisReviewed:state.diagnosisReviewed,
           recommendationSelections:state.recommendationSelections,
-          recommendationText:state.recommendationText
+          recommendationText:state.recommendationText,
+          conclusionsText:state.conclusionsText,
+          conclusionsEdited:state.conclusionsEdited
         },
         description:state.description||null,
         interpretation:state.interpretation||null,
-        recommendations:state.recommendations||null
+        recommendations:state.recommendationText||state.recommendations||null
       };
 
       const {error}=await sb
