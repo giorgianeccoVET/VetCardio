@@ -1886,31 +1886,31 @@ function ecgView(examId){
 
           <p><b>Cardiologia</b></p>
           <div class="exam-grid">
-            ${toggleButton(examId,'recommendationSelections','echocardiography','Ecocardiografia',state.recommendationSelections)}
-            ${toggleButton(examId,'recommendationSelections','ecg_control','ECG di controllo',state.recommendationSelections)}
-            ${toggleButton(examId,'recommendationSelections','holter','Holter 24 ore',state.recommendationSelections)}
-            ${toggleButton(examId,'recommendationSelections','atropine_test','Test all’atropina',state.recommendationSelections)}
-            ${toggleButton(examId,'recommendationSelections','continuous_ecg','Monitoraggio ECG continuo',state.recommendationSelections)}
+            ${toggleButton(examId,'recommendationSelections','echocardiography','Ecocardiografia',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
+            ${toggleButton(examId,'recommendationSelections','ecg_control','ECG di controllo',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
+            ${toggleButton(examId,'recommendationSelections','holter','Holter 24 ore',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
+            ${toggleButton(examId,'recommendationSelections','atropine_test','Test all’atropina',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
+            ${toggleButton(examId,'recommendationSelections','continuous_ecg','Monitoraggio ECG continuo',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
           </div>
 
           <p><b>Laboratorio</b></p>
           <div class="exam-grid">
-            ${toggleButton(examId,'recommendationSelections','electrolytes','Elettroliti',state.recommendationSelections)}
-            ${toggleButton(examId,'recommendationSelections','troponin','Troponina cardiaca',state.recommendationSelections)}
-            ${toggleButton(examId,'recommendationSelections','blood_gas','Emogasanalisi',state.recommendationSelections)}
+            ${toggleButton(examId,'recommendationSelections','electrolytes','Elettroliti',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
+            ${toggleButton(examId,'recommendationSelections','troponin','Troponina cardiaca',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
+            ${toggleButton(examId,'recommendationSelections','blood_gas','Emogasanalisi',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
           </div>
 
           <p><b>Diagnostica</b></p>
           <div class="exam-grid">
-            ${toggleButton(examId,'recommendationSelections','blood_pressure','Pressione arteriosa',state.recommendationSelections)}
-            ${toggleButton(examId,'recommendationSelections','thoracic_xrays','Radiografie toraciche',state.recommendationSelections)}
+            ${toggleButton(examId,'recommendationSelections','blood_pressure','Pressione arteriosa',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
+            ${toggleButton(examId,'recommendationSelections','thoracic_xrays','Radiografie toraciche',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
           </div>
 
           <p><b>Gestione</b></p>
           <div class="exam-grid">
-            ${toggleButton(examId,'recommendationSelections','cardiology_consult','Consulenza cardiologica',state.recommendationSelections)}
-            ${toggleButton(examId,'recommendationSelections','hospitalization','Ricovero e monitoraggio',state.recommendationSelections)}
-            ${toggleButton(examId,'recommendationSelections','none','Nessun ulteriore approfondimento',state.recommendationSelections)}
+            ${toggleButton(examId,'recommendationSelections','cardiology_consult','Consulenza cardiologica',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
+            ${toggleButton(examId,'recommendationSelections','hospitalization','Ricovero e monitoraggio',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
+            ${toggleButton(examId,'recommendationSelections','none','Nessun ulteriore approfondimento',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
           </div>
 
           <label style="display:block;margin-top:16px">
@@ -2358,6 +2358,36 @@ function bind(){
     };
   });
 
+
+
+  document.querySelectorAll('[data-recommendation-toggle]').forEach(button=>{
+    button.onclick=()=>{
+      const examId=button.dataset.recommendationToggle;
+      const value=button.dataset.value;
+      const state=getEcgState(examId);
+
+      let list=Array.isArray(state.recommendationSelections)
+        ? [...state.recommendationSelections]
+        : [];
+
+      if(list.includes(value)){
+        list=list.filter(item=>item!==value);
+      }else{
+        list.push(value);
+      }
+
+      if(value==='none'&&list.includes('none')){
+        list=['none'];
+      }else if(value!=='none'&&list.includes(value)){
+        list=list.filter(item=>item!=='none');
+      }
+
+      state.recommendationSelections=list;
+      state.recommendationText=buildRecommendationText(list);
+      state.saved=false;
+      render();
+    };
+  });
 
   document.querySelectorAll('[data-apply-auto-recommendations]').forEach(button=>{
     button.onclick=()=>{
