@@ -862,173 +862,127 @@ function ectopyDiagnosis(state){
   return result+'.';
 }
 
-function buildDiagnosisItems(state,species=''){
-  const items=[];
+function buildClinicalFindings(state,species=''){
+  const findings=[];
+  const add=(code,category,label,diagnosticText,abnormal=true,meta={})=>{
+    findings.push({code,category,label,diagnosticText,abnormal,...meta});
+  };
 
-  // Ritmo e principali disturbi
   if(state.rhythmOrigin==='sinusale'){
     if(state.wanderingDecision==='confirm'){
-      items.push('Ritmo sinusale con pacemaker migrante (wandering pacemaker).');
+      add('wandering_pacemaker','rhythm','Pacemaker migrante',
+        'Ritmo sinusale con pacemaker migrante (wandering pacemaker).',true);
     }else{
-      items.push('Ritmo sinusale.');
+      add('sinus_rhythm','rhythm','Ritmo sinusale','Ritmo sinusale.',false);
     }
   }else if(state.rhythmOrigin==='fibrillazione_atriale'){
-    items.push('Fibrillazione atriale.');
+    add('atrial_fibrillation','rhythm','Fibrillazione atriale','Fibrillazione atriale.',true);
   }else if(state.rhythmOrigin==='flutter_atriale'){
-    items.push('Flutter atriale.');
+    add('atrial_flutter','rhythm','Flutter atriale','Flutter atriale.',true);
   }else if(state.rhythmOrigin==='atriale'){
-    items.push('Ritmo atriale.');
+    add('atrial_rhythm','rhythm','Ritmo atriale','Ritmo atriale.',true);
   }else if(state.rhythmOrigin==='giunzionale'){
-    items.push('Ritmo giunzionale.');
+    add('junctional_rhythm','rhythm','Ritmo giunzionale','Ritmo giunzionale.',true);
   }else if(state.rhythmOrigin==='ventricolare'){
-    items.push('Ritmo ventricolare.');
+    add('ventricular_rhythm','rhythm','Ritmo ventricolare','Ritmo ventricolare.',true);
   }
 
   if(state.bav1Decision==='confirm'){
-    items.push('Blocco atrioventricolare di I grado.');
+    add('av_block_1','conduction','BAV I grado','Blocco atrioventricolare di I grado.',true);
   }
-
   if(state.bav2Decision==='confirm'){
     const subtype=bav2SubtypeLabel(state.bav2Subtype);
-    items.push(subtype
-      ? `Blocco atrioventricolare di II grado, ${subtype}.`
-      : 'Blocco atrioventricolare di II grado.');
+    add('av_block_2','conduction',subtype?`BAV II grado — ${subtype}`:'BAV II grado',
+      subtype?`Blocco atrioventricolare di II grado, ${subtype}.`:'Blocco atrioventricolare di II grado.',
+      true,{subtype:state.bav2Subtype||''});
   }else if(state.conductionMode==='advanced'){
-    items.push('Blocco atrioventricolare avanzato.');
+    add('advanced_av_block','conduction','BAV avanzato','Blocco atrioventricolare avanzato.',true);
   }else if(state.conductionMode==='complete'){
-    items.push('Blocco atrioventricolare completo.');
+    add('complete_av_block','conduction','BAV completo','Blocco atrioventricolare completo.',true);
   }else if(state.conductionMode==='none'){
-    items.push('Assenza di disturbi della conduzione atrioventricolare.');
+    add('normal_av_conduction','conduction','Conduzione AV nei limiti',
+      'Assenza di disturbi della conduzione atrioventricolare.',false);
   }
 
-  const ectopy=ectopyDiagnosis(state);
-  if(ectopy){
-    items.push(ectopy);
+  if(state.ectopyMode==='present'){
+    const ectopyText=ectopyDiagnosis(state);
+    add(
+      state.ectopyOrigin==='ventricular'?'ventricular_ectopy':
+      state.ectopyOrigin==='supraventricular'?'supraventricular_ectopy':'ectopy_uncertain',
+      'ectopy',ectopyText.replace(/\.$/,''),ectopyText,true,
+      {origin:state.ectopyOrigin||'',morphology:state.ectopyMorphology||'',
+       patterns:Array.isArray(state.ectopyPatterns)?state.ectopyPatterns:[],
+       count:state.ectopyCount||''}
+    );
   }else if(state.ectopyMode==='absent'){
-    items.push('Assenza di battiti ectopici nel tracciato registrato.');
+    add('no_ectopy','ectopy','Assenza di battiti ectopici',
+      'Assenza di battiti ectopici nel tracciato registrato.',false);
   }
 
   const axis=axisProposal(state,species);
   if(axis&&state.axisDecision==='confirm'){
     if(axis.code==='normal'){
-      items.push('Asse elettrico medio del QRS nei limiti orientativi per la posizione di registrazione.');
+      add('normal_axis','axis','Asse elettrico nei limiti',
+        'Asse elettrico medio del QRS nei limiti orientativi per la posizione di registrazione.',false);
     }else{
-      items.push(axis.sentence);
+      add(axis.code==='left'?'left_axis_deviation':'right_axis_deviation',
+        'axis',axis.label,axis.sentence,true);
     }
   }
 
   if(state.qtMode==='normal'){
-    items.push('Intervallo QT nei limiti della norma.');
+    add('normal_qt','qt','QT nei limiti','Intervallo QT nei limiti della norma.',false);
   }else if(state.qtMode==='prolonged'){
-    items.push('Intervallo QT allungato.');
+    add('prolonged_qt','qt','QT allungato','Intervallo QT allungato.',true);
   }else if(state.qtMode==='shortened'){
-    items.push('Intervallo QT accorciato.');
+    add('short_qt','qt','QT accorciato','Intervallo QT accorciato.',true);
   }else if(state.qtMode==='not_evaluable'){
-    items.push('Intervallo QT non valutabile.');
+    add('qt_not_evaluable','qt','QT non valutabile','Intervallo QT non valutabile.',true);
   }
 
-  return [...new Set(items)];
+  return findings;
+}
+
+function buildDiagnosisItems(state,species=''){
+  return buildClinicalFindings(state,species)
+    .filter(f=>f.abnormal)
+    .map(f=>f.diagnosticText);
 }
 
 function buildAutomaticDiagnosis(state,species=''){
-  const items=buildDiagnosisItems(state,species);
+  const findings=buildClinicalFindings(state,species);
+  const abnormal=findings.filter(f=>f.abnormal);
+  const normal=findings.filter(f=>!f.abnormal);
 
-  const hasMajorFinding =
-    state.wanderingDecision==='confirm' ||
-    state.bav1Decision==='confirm' ||
-    state.bav2Decision==='confirm' ||
-    state.conductionMode==='advanced' ||
-    state.conductionMode==='complete' ||
-    state.ectopyMode==='present' ||
-    state.rhythmOrigin==='fibrillazione_atriale' ||
-    state.rhythmOrigin==='flutter_atriale' ||
-    state.rhythmOrigin==='atriale' ||
-    state.rhythmOrigin==='giunzionale' ||
-    state.rhythmOrigin==='ventricolare' ||
-    state.qtMode==='prolonged' ||
-    state.qtMode==='shortened' ||
-    (axisProposal(state,species)?.code && axisProposal(state,species)?.code!=='normal');
+  const hasEnoughNormalData =
+    findings.some(f=>f.category==='rhythm') &&
+    findings.some(f=>f.category==='conduction') &&
+    findings.some(f=>f.category==='ectopy') &&
+    findings.some(f=>f.category==='axis') &&
+    findings.some(f=>f.category==='qt');
 
-  const normalCore =
-    state.rhythmOrigin==='sinusale' &&
-    !hasMajorFinding &&
-    state.conductionMode==='none' &&
-    state.ectopyMode==='absent' &&
-    state.qtMode==='normal' &&
-    axisProposal(state,species)?.code==='normal' &&
-    state.axisDecision==='confirm';
-
-  if(normalCore){
-    return {
-      summary:'ECG nei limiti della norma.',
-      items
-    };
+  if(!abnormal.length&&hasEnoughNormalData){
+    return {summary:'ECG nei limiti della norma.',findings,abnormal,normal};
+  }
+  if(!abnormal.length){
+    return {summary:'',findings,abnormal,normal};
   }
 
-  // Costruisce una frase diagnostica sintetica con i reperti principali
-  const main=[];
+  const phrases=abnormal.map(f=>f.diagnosticText.replace(/\.$/,''));
+  const summary=phrases.length===1
+    ? phrases[0]+'.'
+    : phrases.slice(0,-1).join(', ')+' e '+phrases[phrases.length-1]+'.';
 
-  if(state.rhythmOrigin==='fibrillazione_atriale'){
-    main.push('Fibrillazione atriale');
-  }else if(state.rhythmOrigin==='flutter_atriale'){
-    main.push('Flutter atriale');
-  }else if(state.rhythmOrigin==='sinusale'){
-    if(state.wanderingDecision==='confirm'){
-      main.push('Ritmo sinusale con pacemaker migrante (wandering pacemaker)');
-    }else{
-      main.push('Ritmo sinusale');
-    }
-  }else if(state.rhythmOrigin==='atriale'){
-    main.push('Ritmo atriale');
-  }else if(state.rhythmOrigin==='giunzionale'){
-    main.push('Ritmo giunzionale');
-  }else if(state.rhythmOrigin==='ventricolare'){
-    main.push('Ritmo ventricolare');
-  }
-
-  if(state.bav1Decision==='confirm'){
-    main.push('blocco atrioventricolare di I grado');
-  }
-  if(state.bav2Decision==='confirm'){
-    const subtype=bav2SubtypeLabel(state.bav2Subtype);
-    main.push(subtype
-      ? `blocco atrioventricolare di II grado, ${subtype}`
-      : 'blocco atrioventricolare di II grado');
-  }else if(state.conductionMode==='advanced'){
-    main.push('blocco atrioventricolare avanzato');
-  }else if(state.conductionMode==='complete'){
-    main.push('blocco atrioventricolare completo');
-  }
-
-  if(state.ectopyMode==='present'){
-    const ectopy=ectopyDiagnosis(state).replace(/\.$/,'');
-    if(ectopy) main.push(ectopy.charAt(0).toLowerCase()+ectopy.slice(1));
-  }
-
-  const axis=axisProposal(state,species);
-  if(axis&&state.axisDecision==='confirm'&&axis.code!=='normal'){
-    main.push(axis.sentence.replace(/\.$/,'').toLowerCase());
-  }
-
-  if(state.qtMode==='prolonged'){
-    main.push('intervallo QT allungato');
-  }else if(state.qtMode==='shortened'){
-    main.push('intervallo QT accorciato');
-  }
-
-  let summary='';
-  if(main.length===1){
-    summary=main[0]+'.';
-  }else if(main.length>1){
-    summary=main.slice(0,-1).join(', ')+' e '+main[main.length-1]+'.';
-  }
-
-  return {summary,items};
+  return {summary,findings,abnormal,normal};
 }
 
 function automaticDiagnosisText(state,species=''){
   const auto=buildAutomaticDiagnosis(state,species);
   return auto.summary||auto.items.join(' ');
+}
+
+function clinicalFindingCodes(state,species=''){
+  return new Set(buildClinicalFindings(state,species).map(f=>f.code));
 }
 
 function diagnosisDot(state,species=''){
@@ -1590,39 +1544,36 @@ function ecgView(examId){
       ${state.openStep===key&&key==='diagnosi'?`
         <div class="card" style="margin:12px 0">
           <h3>Diagnosi ECG</h3>
-          <p class="meta">VetCardio riunisce i reperti già inseriti e confermati. La formulazione finale resta sempre sotto il tuo controllo.</p>
+          <p class="meta">VetCardio usa un motore clinico unico per riunire i reperti confermati. La formulazione finale resta sempre sotto il tuo controllo.</p>
 
           ${(()=>{
             const auto=buildAutomaticDiagnosis(state,p.species);
-            if(!auto.summary&&!auto.items.length){
+            if(!auto.summary&&!auto.findings.length){
               return `<div class="notice">
                 Non sono ancora presenti elementi sufficienti per formulare una diagnosi automatica.
               </div>`;
             }
             return `<div class="notice">
               <b>Diagnosi automatica proposta</b>
-              ${auto.summary?`<div style="margin-top:10px;font-weight:600">${esc(auto.summary)}</div>`:''}
-              ${auto.items.length?`
-                <div style="margin-top:12px">
-                  ${auto.items.map(item=>`<div style="margin:7px 0">• ${esc(item)}</div>`).join('')}
+              <div style="margin-top:10px;font-weight:600">${esc(auto.summary||'Diagnosi non ancora conclusiva.')}</div>
+              ${auto.abnormal.length?`
+                <div style="margin-top:14px">
+                  <b>Alterazioni utilizzate</b>
+                  ${auto.abnormal.map(item=>`<div style="margin:7px 0">• ${esc(item.label)}</div>`).join('')}
                 </div>
               `:''}
             </div>`;
           })()}
 
           <div style="margin-top:16px">
-            <button type="button"
-              class="secondary"
-              data-copy-auto-diagnosis="${examId}">
+            <button type="button" class="secondary" data-copy-auto-diagnosis="${examId}">
               Usa la proposta come diagnosi finale
             </button>
           </div>
 
           <label style="display:block;margin-top:16px">
             Diagnosi finale
-            <textarea rows="5"
-              data-ecg-text="${examId}"
-              data-field="diagnosisFinal"
+            <textarea rows="5" data-ecg-text="${examId}" data-field="diagnosisFinal"
               placeholder="Scrivi o modifica qui la diagnosi ECG finale...">${esc(state.diagnosisFinal)}</textarea>
           </label>
 
@@ -1640,7 +1591,7 @@ function ecgView(examId){
           </div>
 
           <div class="notice" style="margin-top:14px">
-            Questa sezione non assegna automaticamente gravità, prognosi o terapia.
+            Il motore clinico distingue i reperti normali dalle alterazioni e usa nella diagnosi solo gli elementi clinicamente rilevanti.
           </div>
         </div>
       `:''}
