@@ -1080,7 +1080,7 @@ function ecgView(examId){
     ['PR','Intervallo PR',prDot(state),'pr'],
     ['Conduzione','Disturbi della conduzione',conductionDot(state),'conduzione'],
     ['Extrasistoli','Battiti ectopici',ectopyDot(state),'extrasistoli'],
-    ['Onda T','Morfologia dell’onda T',tWaveDot(state),'onda-t'],
+    ['ST–T','Segmento ST e onda T',tWaveDot(state),'onda-t'],
     ['QT','Intervallo QT',qtDot(state),'qt'],
     ['Asse','Asse elettrico',axisDot(state,p.species),'asse'],
     ['Diagnosi','Interpretazione elettrocardiografica',diagnosisDot(state,p.species),'diagnosi'],
@@ -1894,21 +1894,7 @@ function bind(){
         state.axisDecision='';
       }
       state.description=buildEcgDescription(state);
-      if(
-        b.dataset.field==='wanderingDecision'
-        || b.dataset.field==='bav1Decision'
-        || b.dataset.field==='bav2Decision'
-        || b.dataset.field==='bav2Subtype'
-        || b.dataset.field==='axisPosition'
-        || b.dataset.field==='axisDecision'
-        || b.dataset.field==='diagnosisReviewed'
-        || b.dataset.field==='diagnosisType'
-        || wanderingSuggested(state)
-        || bav1Suggested(state)
-        || bav2Suggested(state)
-      ){
-        state.interpretation=buildEcgInterpretation(state,speciesForExam(examId));
-      }
+      state.interpretation=buildEcgInterpretation(state,speciesForExam(examId));
       state.saved=false;
       render();
     };
