@@ -1201,6 +1201,7 @@ function ecgView(examId){
     ['QT','Intervallo QT',qtDot(state),'qt'],
     ['Asse','Asse elettrico',axisDot(state,p.species),'asse'],
     ['Diagnosi','Interpretazione elettrocardiografica',diagnosisDot(state,p.species),'diagnosi'],
+    ['Coerenza','Controllo di coerenza ECG',consistencyDot(state,p.species),'coerenza'],
     ['Raccomandazioni','Approfondimenti consigliati','⚪','raccomandazioni']
   ];
 
