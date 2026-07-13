@@ -987,6 +987,123 @@ function clinicalFindingCodes(state,species=''){
   return new Set(buildClinicalFindings(state,species).map(f=>f.code));
 }
 
+function buildConsistencyChecks(state,species=''){
+  const checks=[];
+  const add=(level,title,message,modules=[])=>{
+    checks.push({level,title,message,modules});
+  };
+
+  const pAbsent =
+    state.pWaveMode==='detail' &&
+    Array.isArray(state.pWaveFindings) &&
+    state.pWaveFindings.includes('assente');
+
+  const pNormal = state.pWaveMode==='normal';
+
+  const prMeasured = Boolean(String(state.prValue||'').trim());
+
+  const qrsWide =
+    state.qrsMode==='detail' &&
+    Array.isArray(state.qrsFindings) &&
+    state.qrsFindings.includes('durata_aumentata');
+
+  const ventricularEctopy =
+    state.ectopyMode==='present' &&
+    state.ectopyOrigin==='ventricular';
+
+  const allPConducted = state.pToQrs==='yes';
+
+  if(state.rhythmOrigin==='sinusale'&&pAbsent){
+    add(
+      'error',
+      'Ritmo sinusale senza onde P',
+      'Il ritmo sinusale richiede onde P riconoscibili.',
+      ['Ritmo','Onda P']
+    );
+  }
+
+  if(state.rhythmOrigin==='fibrillazione_atriale'&&prMeasured){
+    add(
+      'error',
+      'PR misurato in fibrillazione atriale',
+      'In fibrillazione atriale l’intervallo PR non è misurabile.',
+      ['Ritmo','Intervallo PR']
+    );
+  }
+
+  if(state.rhythmOrigin==='flutter_atriale'&&prMeasured){
+    add(
+      'error',
+      'PR misurato nel flutter atriale',
+      'Nel flutter atriale l’intervallo PR generalmente non è valutabile.',
+      ['Ritmo','Intervallo PR']
+    );
+  }
+
+  if(state.conductionMode==='complete'&&allPConducted){
+    add(
+      'error',
+      'BAV completo con conduzione 1:1',
+      'Nel blocco atrioventricolare completo deve essere presente dissociazione atrio-ventricolare.',
+      ['Relazione P–QRS','Conduzione']
+    );
+  }
+
+  if(state.wanderingDecision==='confirm'&&pNormal){
+    add(
+      'error',
+      'Wandering pacemaker con onda P normale',
+      'Il pacemaker migrante richiede variazioni della morfologia dell’onda P.',
+      ['Ritmo','Onda P']
+    );
+  }
+
+  if(state.bav1Decision==='confirm'&&state.prMode!=='prolonged_constant'){
+    add(
+      'error',
+      'BAV I con PR non allungato',
+      'Il blocco atrioventricolare di I grado richiede un intervallo PR allungato e costante.',
+      ['Intervallo PR','Conduzione']
+    );
+  }
+
+  if(state.bav2Decision==='confirm'&&state.prMode==='normal_constant'){
+    add(
+      'info',
+      'Verificare il sottotipo di BAV II',
+      'Nel BAV II il PR può essere normale e costante nei battiti condotti, come nel Mobitz II; verificare che il sottotipo selezionato sia coerente.',
+      ['Intervallo PR','Conduzione']
+    );
+  }
+
+  if(qrsWide&&state.conductionMode==='none'&&state.ectopyMode==='absent'){
+    add(
+      'warning',
+      'QRS largo senza causa indicata',
+      'Valutare la presenza di un blocco di branca o di un’origine ventricolare.',
+      ['QRS','Conduzione','Extrasistoli']
+    );
+  }
+
+  if(ventricularEctopy&&state.qrsMode==='normal'){
+    add(
+      'info',
+      'Extrasistolia ventricolare con QRS descritto come normale',
+      'Verificare che la classificazione dell’extrasistole e la morfologia del QRS siano coerenti.',
+      ['QRS','Extrasistoli']
+    );
+  }
+
+  return checks;
+}
+
+function consistencyDot(state,species=''){
+  const checks=buildConsistencyChecks(state,species);
+  if(!checks.length) return '🟢';
+  if(checks.some(c=>c.level==='error')) return '🟠';
+  return '🟡';
+}
+
 function diagnosisDot(state,species=''){
   const items=buildDiagnosisItems(state,species);
   if(state.diagnosisReviewed==='confirmed') return '🟢';
@@ -1590,6 +1707,42 @@ function ecgView(examId){
           <div class="notice" style="margin-top:14px">
             Il motore clinico distingue i reperti normali dalle alterazioni e usa nella diagnosi solo gli elementi clinicamente rilevanti.
           </div>
+        </div>
+      `:''}
+
+      ${state.openStep===key&&key==='coerenza'?`
+        <div class="card" style="margin:12px 0">
+          <h3>Controllo di coerenza ECG</h3>
+          <p class="meta">VetCardio segnala eventuali dati incompatibili o elementi da ricontrollare, senza modificare automaticamente il referto.</p>
+
+          ${(()=>{
+            const checks=buildConsistencyChecks(state,p.species);
+            if(!checks.length){
+              return `<div class="notice">
+                <b>🟢 Nessuna incongruenza rilevata.</b>
+              </div>`;
+            }
+
+            return `<div>
+              <div class="notice" style="margin-bottom:12px">
+                <b>⚠️ Sono presenti alcuni dati che meritano una verifica.</b>
+              </div>
+
+              ${checks.map(check=>{
+                const icon=check.level==='error'?'⚠️':check.level==='warning'?'🟠':'💡';
+                const label=check.level==='error'?'Incongruenza':check.level==='warning'?'Attenzione':'Suggerimento';
+                return `<div class="notice" style="margin:10px 0">
+                  <b>${icon} ${label}: ${esc(check.title)}</b>
+                  <div style="margin-top:7px">${esc(check.message)}</div>
+                  ${check.modules.length?`
+                    <div class="meta" style="margin-top:8px">
+                      Controllare: ${check.modules.map(esc).join(' · ')}
+                    </div>
+                  `:''}
+                </div>`;
+              }).join('')}
+            </div>`;
+          })()}
         </div>
       `:''}
     `).join('')}
