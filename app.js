@@ -504,14 +504,51 @@ function buildEcgDescription(state){
   }
 
   if(state.tWaveMorphology||state.tWavePolarity||state.tWaveFindings.length||state.tWaveAmplitude){
-    const polarity=tWavePolarityLabel(state.tWavePolarity);
-    const findings=state.tWaveFindings.map(tWaveFindingLabel);
+    const rawFindings=Array.isArray(state.tWaveFindings)?state.tWaveFindings:[];
+    const findingCodes=[...new Set(rawFindings)];
+
+    // La morfologia bifasica prevale sulla singola polarità positiva/negativa.
+    const isBiphasic=state.tWavePolarity==='biphasic'||findingCodes.includes('biphasic');
+    const isVariable=state.tWavePolarity==='variable'||findingCodes.includes('variable');
+    const hasSpecificAlteration=findingCodes.some(code=>!['biphasic','variable'].includes(code));
+    const descriptors=[];
+
+    if(isBiphasic){
+      descriptors.push('bifasica');
+    }else if(isVariable){
+      descriptors.push('a polarità variabile');
+    }else{
+      const polarity=tWavePolarityLabel(state.tWavePolarity);
+      if(polarity) descriptors.push(polarity);
+    }
+
+    findingCodes.forEach(code=>{
+      if(code==='biphasic'||code==='variable') return;
+      if(code==='tall'){
+        descriptors.push('di ampiezza aumentata');
+        return;
+      }
+      const label=tWaveFindingLabel(code);
+      if(label&&!descriptors.includes(label)) descriptors.push(label);
+    });
+
     let sentence='Onda T';
-    if(state.tWaveMorphology==='regular') sentence+=' di morfologia regolare';
-    if(state.tWaveMorphology==='altered') sentence+=' di morfologia alterata';
-    if(polarity) sentence+=`${state.tWaveMorphology?', ': ' '}${polarity}`;
-    if(findings.length) sentence+=`${state.tWaveMorphology||polarity?', ': ' '}${findings.join(', ')}`;
-    if(state.tWaveAmplitude) sentence+=` (ampiezza ${normalizeDisplayedRange(state.tWaveAmplitude).replace('.',',')} mV)`;
+
+    // “Regolare” non viene associato a reperti morfologici alterati o bifasici.
+    if(state.tWaveMorphology==='regular'&&!hasSpecificAlteration&&!isBiphasic&&!isVariable){
+      sentence+=' di morfologia regolare';
+    }else if(state.tWaveMorphology==='altered'&&!descriptors.length){
+      sentence+=' di morfologia alterata';
+    }
+
+    if(descriptors.length){
+      sentence+=`${sentence==='Onda T'?' ':', '}${descriptors.join(', ')}`;
+    }
+
+    if(state.tWaveAmplitude){
+      sentence+=` (ampiezza ${normalizeDisplayedRange(state.tWaveAmplitude).replace('.',',')} mV)`;
+    }
+
     parts.push(sentence+'.');
   }
 
