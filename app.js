@@ -1509,6 +1509,7 @@ function normalizeDisplayedRange(value){
   return `${format(min)}–${format(max)}`;
 }
 
+
 async function generateEcgPdf(examId){
   const p=patients.find(patient=>(patient.visits||[]).some(visit=>(visit.exams||[]).some(exam=>exam.id===examId)));
   const v=p?.visits?.find(visit=>(visit.exams||[]).some(exam=>exam.id===examId));
@@ -1544,9 +1545,10 @@ async function generateEcgPdf(examId){
   const pageHeight=297;
   const margin=18;
   const contentWidth=pageWidth-(margin*2);
-  const footerY=289;
+  const contentBottom=278;
+  const footerLineY=283;
+  const footerTextY=289;
   let y=18;
-  let pageNumber=1;
 
   const owner=p.owners||{};
   const patientName=p.name||'Paziente';
@@ -1554,84 +1556,88 @@ async function generateEcgPdf(examId){
   const sex=[p.sex,p.neutered===true?'sterilizzato':p.neutered===false?'intero':''].filter(Boolean).join(', ');
   const weight=v.weight_kg!=null?`${String(v.weight_kg).replace('.',',')} kg`:'';
 
-  const drawFooter=()=>{
-    doc.setDrawColor(205,218,222);
-    doc.line(margin,283,pageWidth-margin,283);
-    doc.setFont('helvetica','normal');
-    doc.setFontSize(8);
-    doc.setTextColor(90,107,117);
-    doc.text('VetCardio - Referto elettrocardiografico',margin,footerY);
-    doc.text(`Pagina ${pageNumber}`,pageWidth-margin,footerY,{align:'right'});
-  };
-
   const drawHeader=()=>{
     doc.setTextColor(15,91,107);
     doc.setFont('helvetica','bold');
     doc.setFontSize(20);
     doc.text('VetCardio',margin,y);
+
     doc.setFontSize(8.5);
     doc.setTextColor(90,107,117);
     doc.text('ARCHIVIO CLINICO VETERINARIO',margin,y+5);
+
     doc.setDrawColor(15,91,107);
     doc.setLineWidth(0.6);
     doc.line(margin,y+9,pageWidth-margin,y+9);
     y+=18;
   };
 
-  const newPage=()=>{
-    drawFooter();
+  const addNewPage=()=>{
     doc.addPage();
-    pageNumber+=1;
     y=18;
     drawHeader();
   };
 
   const ensureSpace=needed=>{
-    if(y+needed>278) newPage();
+    if(y+needed>contentBottom) addNewPage();
   };
 
-  const addLabelValue=(label,value)=>{
-    const safe=String(value||'—');
-    const lines=doc.splitTextToSize(safe,contentWidth-43);
-    const height=Math.max(6,lines.length*4.6);
-    ensureSpace(height+2);
+  const splitLines=(value,width=contentWidth)=>{
+    return doc.splitTextToSize(String(value||'—'),width);
+  };
+
+  const addInfoRow=(label,value,labelWidth=43)=>{
+    const lines=splitLines(value,contentWidth-labelWidth);
+    const rowHeight=Math.max(6,lines.length*4.6);
+    ensureSpace(rowHeight+1);
+
     doc.setFont('helvetica','bold');
     doc.setFontSize(9.5);
     doc.setTextColor(44,61,70);
     doc.text(label,margin,y);
+
     doc.setFont('helvetica','normal');
     doc.setTextColor(30,39,44);
-    doc.text(lines,margin+43,y);
-    y+=height;
+    doc.text(lines,margin+labelWidth,y);
+    y+=rowHeight;
   };
 
-  const addSection=(title,text)=>{
-    const clean=String(text||'').trim()||'—';
-    const paragraphs=clean.split(/\n+/).map(x=>x.trim()).filter(Boolean);
-    const lineSets=paragraphs.map(paragraph=>doc.splitTextToSize(paragraph,contentWidth));
-    const totalLines=lineSets.reduce((sum,lines)=>sum+lines.length,0)+(lineSets.length-1);
-    const estimated=9+(totalLines*5);
-    ensureSpace(Math.min(estimated,65));
-
+  const addSectionTitle=title=>{
+    ensureSpace(15);
     doc.setFont('helvetica','bold');
     doc.setFontSize(12);
     doc.setTextColor(15,91,107);
     doc.text(title,margin,y);
     y+=7;
+  };
+
+  const addSection=(title,text)=>{
+    const clean=String(text||'').trim()||'—';
+    const paragraphs=clean.split(/\n+/).map(item=>item.trim()).filter(Boolean);
+    const prepared=paragraphs.map(paragraph=>splitLines(paragraph));
+
+    // Evita che il titolo resti isolato a fondo pagina.
+    const firstParagraphHeight=(prepared[0]?.length||1)*5;
+    ensureSpace(Math.min(15+firstParagraphHeight,45));
+    addSectionTitle(title);
 
     doc.setFont('helvetica','normal');
     doc.setFontSize(10.5);
     doc.setTextColor(28,39,44);
 
-    for(const lines of lineSets){
-      for(const line of lines){
-        if(y+5>278) newPage();
+    prepared.forEach((lines,index)=>{
+      lines.forEach(line=>{
+        if(y+5>contentBottom) addNewPage();
+        doc.setFont('helvetica','normal');
+        doc.setFontSize(10.5);
+        doc.setTextColor(28,39,44);
         doc.text(line,margin,y);
         y+=5;
-      }
-      y+=2;
-    }
-    y+=3;
+      });
+      if(index<prepared.length-1) y+=2;
+    });
+
+    y+=6;
   };
 
   drawHeader();
@@ -1644,24 +1650,33 @@ async function generateEcgPdf(examId){
 
   const identityRows=[
     ['Proprietario',ownerName||'—'],
-    ['Paziente',[patientName,p.species,p.breed].filter(Boolean).join(' - ')],
+    ['Paziente',[patientName,p.species,p.breed].filter(Boolean).join(' - ')||'—'],
     ...(p.age_text?[['Età',p.age_text]]:[]),
     ...(sex?[['Sesso',sex]]:[]),
-    ...(weight?[['Peso',weight]]:[])
+    ...(weight?[['Peso',weight]]:[]),
+    ...(p.microchip?[['Microchip',p.microchip]]:[])
   ];
-  const identityBoxHeight=identityRows.length*6+9;
 
+  const identityBoxHeight=identityRows.reduce((sum,[,value])=>{
+    const lines=splitLines(value,contentWidth-43);
+    return sum+Math.max(6,lines.length*4.6);
+  },9);
+
+  ensureSpace(identityBoxHeight+8);
   doc.setFillColor(246,250,251);
   doc.setDrawColor(211,223,227);
   doc.roundedRect(margin,y-4,contentWidth,identityBoxHeight,3,3,'FD');
   y+=3;
-  identityRows.forEach(([label,value])=>addLabelValue(label,value));
+  identityRows.forEach(([label,value])=>addInfoRow(label,value));
   y+=5;
 
-  addLabelValue('Data esame',fmt(v.visit_date));
-  if(v.clinic) addLabelValue('Clinica',v.clinic);
-  if(v.reason) addLabelValue('Motivo',v.reason);
-  y+=4;
+  const examRows=[
+    ['Data esame',fmt(v.visit_date)],
+    ...(v.clinic?[['Clinica',v.clinic]]:[]),
+    ...(v.reason?[['Motivo',v.reason]]:[])
+  ];
+  examRows.forEach(([label,value])=>addInfoRow(label,value));
+  y+=5;
 
   if(report.clinicalHistory) addSection('Sintomi ed episodi riferiti',report.clinicalHistory);
   addSection('Descrizione elettrocardiografica',report.description);
@@ -1670,10 +1685,11 @@ async function generateEcgPdf(examId){
   addSection('Conclusioni',report.conclusions);
   addSection('Raccomandazioni',report.recommendations);
 
-  ensureSpace(38);
+  ensureSpace(40);
   doc.setDrawColor(205,218,222);
   doc.line(margin,y,pageWidth-margin,y);
   y+=7;
+
   doc.setFont('helvetica','normal');
   doc.setFontSize(8.5);
   doc.setTextColor(90,107,117);
@@ -1682,10 +1698,12 @@ async function generateEcgPdf(examId){
 
   const veterinarianName=String(cfg.VETERINARIAN_NAME||'').trim();
   const veterinarianQualification=String(cfg.VETERINARIAN_QUALIFICATION||'Medico veterinario').trim();
+
   doc.setFont('helvetica','bold');
   doc.setFontSize(9.5);
   doc.setTextColor(44,61,70);
   doc.text(veterinarianName||veterinarianQualification,margin,y);
+
   if(veterinarianName&&veterinarianQualification){
     doc.setFont('helvetica','normal');
     doc.setFontSize(8.5);
@@ -1700,7 +1718,20 @@ async function generateEcgPdf(examId){
   doc.setTextColor(90,107,117);
   doc.text('Firma',pageWidth-48,y+12,{align:'center'});
 
-  drawFooter();
+  // Footer definitivo su tutte le pagine, con numero totale.
+  const totalPages=doc.getNumberOfPages();
+  for(let page=1;page<=totalPages;page+=1){
+    doc.setPage(page);
+    doc.setDrawColor(205,218,222);
+    doc.setLineWidth(0.2);
+    doc.line(margin,footerLineY,pageWidth-margin,footerLineY);
+
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(8);
+    doc.setTextColor(90,107,117);
+    doc.text('VetCardio - Referto elettrocardiografico',margin,footerTextY);
+    doc.text(`Pagina ${page} di ${totalPages}`,pageWidth-margin,footerTextY,{align:'right'});
+  }
 
   const filename=`VetCardio_ECG_${v.visit_date||'data'}_${safePdfFilename(owner.surname||'proprietario')}_${safePdfFilename(patientName)}.pdf`;
   doc.save(filename);
