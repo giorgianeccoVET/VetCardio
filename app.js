@@ -1358,6 +1358,195 @@ function buildFinalReport(state,species=''){
   };
 }
 
+
+function loadExternalScript(src){
+  return new Promise((resolve,reject)=>{
+    const existing=document.querySelector(`script[data-vetcardio-src="${src}"]`);
+    if(existing){
+      if(existing.dataset.loaded==='true') return resolve();
+      existing.addEventListener('load',resolve,{once:true});
+      existing.addEventListener('error',()=>reject(new Error('Impossibile caricare il generatore PDF.')),{once:true});
+      return;
+    }
+
+    const script=document.createElement('script');
+    script.src=src;
+    script.async=true;
+    script.dataset.vetcardioSrc=src;
+    script.onload=()=>{
+      script.dataset.loaded='true';
+      resolve();
+    };
+    script.onerror=()=>reject(new Error('Impossibile caricare il generatore PDF.'));
+    document.head.appendChild(script);
+  });
+}
+
+function safePdfFilename(value){
+  return String(value||'referto')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^a-zA-Z0-9_-]+/g,'_')
+    .replace(/^_+|_+$/g,'')
+    .slice(0,80)||'referto';
+}
+
+async function generateEcgPdf(examId){
+  const p=patients.find(patient=>(patient.visits||[]).some(visit=>(visit.exams||[]).some(exam=>exam.id===examId)));
+  const v=p?.visits?.find(visit=>(visit.exams||[]).some(exam=>exam.id===examId));
+  const e=v?.exams?.find(exam=>exam.id===examId);
+  if(!p||!v||!e) throw new Error('Impossibile recuperare i dati del referto ECG.');
+
+  const state=getEcgState(examId,e);
+  const report={
+    description:String(state.description||buildEcgDescription(state)||'').trim(),
+    interpretation:String(state.interpretation||buildEcgInterpretation(state,p.species)||'').trim(),
+    conclusions:String(state.conclusionsText||buildAutomaticConclusions(state,p.species)||'').trim(),
+    recommendations:String(state.recommendationText||buildRecommendationText(state.recommendationSelections)||'').trim()
+  };
+
+  await loadExternalScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js');
+  const jsPDF=window.jspdf?.jsPDF;
+  if(!jsPDF) throw new Error('Generatore PDF non disponibile.');
+
+  const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+  const pageWidth=210;
+  const pageHeight=297;
+  const margin=18;
+  const contentWidth=pageWidth-(margin*2);
+  const footerY=289;
+  let y=18;
+  let pageNumber=1;
+
+  const owner=p.owners||{};
+  const patientName=p.name||'Paziente';
+  const ownerName=[owner.surname,owner.name].filter(Boolean).join(' ');
+  const sex=[p.sex,p.neutered===true?'sterilizzato':p.neutered===false?'intero':''].filter(Boolean).join(', ');
+  const weight=v.weight_kg!=null?`${String(v.weight_kg).replace('.',',')} kg`:'—';
+
+  const drawFooter=()=>{
+    doc.setDrawColor(205,218,222);
+    doc.line(margin,283,pageWidth-margin,283);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(8);
+    doc.setTextColor(90,107,117);
+    doc.text('VetCardio - Referto elettrocardiografico',margin,footerY);
+    doc.text(`Pagina ${pageNumber}`,pageWidth-margin,footerY,{align:'right'});
+  };
+
+  const drawHeader=()=>{
+    doc.setTextColor(15,91,107);
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(20);
+    doc.text('VetCardio',margin,y);
+    doc.setFontSize(8.5);
+    doc.setTextColor(90,107,117);
+    doc.text('ARCHIVIO CLINICO VETERINARIO',margin,y+5);
+    doc.setDrawColor(15,91,107);
+    doc.setLineWidth(0.6);
+    doc.line(margin,y+9,pageWidth-margin,y+9);
+    y+=18;
+  };
+
+  const newPage=()=>{
+    drawFooter();
+    doc.addPage();
+    pageNumber+=1;
+    y=18;
+    drawHeader();
+  };
+
+  const ensureSpace=needed=>{
+    if(y+needed>278) newPage();
+  };
+
+  const addLabelValue=(label,value)=>{
+    const safe=String(value||'—');
+    const lines=doc.splitTextToSize(safe,contentWidth-43);
+    const height=Math.max(6,lines.length*4.6);
+    ensureSpace(height+2);
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(9.5);
+    doc.setTextColor(44,61,70);
+    doc.text(label,margin,y);
+    doc.setFont('helvetica','normal');
+    doc.setTextColor(30,39,44);
+    doc.text(lines,margin+43,y);
+    y+=height;
+  };
+
+  const addSection=(title,text)=>{
+    const clean=String(text||'').trim()||'—';
+    const paragraphs=clean.split(/\n+/).map(x=>x.trim()).filter(Boolean);
+    const lineSets=paragraphs.map(paragraph=>doc.splitTextToSize(paragraph,contentWidth));
+    const totalLines=lineSets.reduce((sum,lines)=>sum+lines.length,0)+(lineSets.length-1);
+    const estimated=9+(totalLines*5);
+    ensureSpace(Math.min(estimated,65));
+
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(12);
+    doc.setTextColor(15,91,107);
+    doc.text(title,margin,y);
+    y+=7;
+
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(10.5);
+    doc.setTextColor(28,39,44);
+
+    for(const lines of lineSets){
+      for(const line of lines){
+        if(y+5>278) newPage();
+        doc.text(line,margin,y);
+        y+=5;
+      }
+      y+=2;
+    }
+    y+=3;
+  };
+
+  drawHeader();
+
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(16);
+  doc.setTextColor(20,45,52);
+  doc.text('Referto elettrocardiografico',margin,y);
+  y+=11;
+
+  doc.setFillColor(246,250,251);
+  doc.setDrawColor(211,223,227);
+  doc.roundedRect(margin,y-4,contentWidth,45,3,3,'FD');
+  y+=3;
+  addLabelValue('Proprietario',ownerName||'—');
+  addLabelValue('Paziente',[patientName,p.species,p.breed].filter(Boolean).join(' - '));
+  addLabelValue('Età / sesso',[p.age_text,sex].filter(Boolean).join(' - ')||'—');
+  addLabelValue('Peso',weight);
+  y+=5;
+
+  addLabelValue('Data esame',fmt(v.visit_date));
+  addLabelValue('Clinica',v.clinic||'—');
+  addLabelValue('Motivo',v.reason||'—');
+  y+=4;
+
+  addSection('Descrizione elettrocardiografica',report.description);
+  addSection('Interpretazione elettrocardiografica',report.interpretation);
+  addSection('Conclusioni',report.conclusions);
+  addSection('Raccomandazioni',report.recommendations);
+
+  ensureSpace(20);
+  doc.setDrawColor(205,218,222);
+  doc.line(margin,y,pageWidth-margin,y);
+  y+=7;
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(90,107,117);
+  doc.text('Referto generato da VetCardio. Il contenuto deve essere validato dal medico veterinario responsabile.',margin,y);
+
+  drawFooter();
+
+  const filename=`ECG_${safePdfFilename(owner.surname)}_${safePdfFilename(patientName)}_${v.visit_date||'data'}.pdf`;
+  doc.save(filename);
+}
+
 function diagnosisDot(state,species=''){
   const items=buildDiagnosisItems(state,species);
   if(state.diagnosisReviewed==='confirmed') return '🟢';
@@ -2208,6 +2397,7 @@ function ecgView(examId){
   </section>
 
   <button class="btn fixed" data-save-ecg="${examId}">${state.saving?'Salvataggio…':'Salva ECG'}</button>
+  <button class="btn secondary" data-generate-ecg-pdf="${examId}">Genera PDF</button>
   <button class="btn secondary" data-back-visit="${v.id}">Torna alla visita</button>`;
 }
 
@@ -2656,6 +2846,22 @@ function bind(){
       }
       state.saved=false;
       render();
+    };
+  });
+
+  document.querySelectorAll('[data-generate-ecg-pdf]').forEach(button=>{
+    button.onclick=async()=>{
+      const original=button.textContent;
+      button.disabled=true;
+      button.textContent='Generazione PDF…';
+      try{
+        await generateEcgPdf(button.dataset.generateEcgPdf);
+      }catch(error){
+        alert(error?.message||'Errore durante la generazione del PDF.');
+      }finally{
+        button.disabled=false;
+        button.textContent=original;
+      }
     };
   });
 
