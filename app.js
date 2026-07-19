@@ -1663,7 +1663,7 @@ async function generateEcgPdf(examId){
   if(v.reason) addLabelValue('Motivo',v.reason);
   y+=4;
 
-  if(report.clinicalHistory) addSection('Anamnesi aritmica',report.clinicalHistory);
+  if(report.clinicalHistory) addSection('Sintomi ed episodi riferiti',report.clinicalHistory);
   addSection('Descrizione elettrocardiografica',report.description);
   addSection('Diagnosi elettrocardiografica',report.diagnosis);
   addSection('Interpretazione elettrocardiografica',report.interpretation);
@@ -1809,7 +1809,7 @@ function ecgView(examId){
 
       ${state.openStep===key&&key==='anamnesi-ecg'?`
         <div class="card" style="margin:12px 0">
-          <h3>Anamnesi aritmica</h3>
+          <h3>Sintomi ed episodi riferiti</h3>
           <p class="meta">I dati strutturati orientano le raccomandazioni. Se compili le note libere, queste diventano la sintesi anamnestica principale.</p>
 
           <div class="exam-grid">
