@@ -384,7 +384,7 @@ function heartRateInterpretationText(state){
 }
 
 function formatClinicalNumber(value){
-  return normalizeDisplayedRange(value).replace(/^-/, '−');
+  return normalizeDisplayedRange(value);
 }
 
 function symptomDot(state){
@@ -1558,28 +1558,56 @@ function buildAutomaticConclusions(state,species=''){
   const findings=buildClinicalFindings(state,species);
   const codes=new Set(findings.map(f=>f.code));
   const abnormal=findings.filter(f=>f.abnormal);
-  if(buildAutomaticDiagnosis(state,species).summary==='Esame elettrocardiografico nei limiti della norma.') return 'Non si evidenziano alterazioni elettrocardiografiche di rilievo clinico.';
-  const parts=[];
-  if(codes.has('wandering_pacemaker')) parts.push('Il pacemaker migrante rappresenta generalmente una variante fisiologica nel cane, in assenza di ulteriori alterazioni cliniche o elettrocardiografiche.');
-  if(codes.has('av_block_1')) parts.push('Il reperto documenta un ritardo della conduzione atrioventricolare, da correlare alla frequenza cardiaca e al quadro clinico.');
-  if(codes.has('av_block_2')) parts.push('Il blocco atrioventricolare di II grado richiede caratterizzazione clinica e valutazione della risposta cronotropa.');
-  if(codes.has('advanced_av_block')) parts.push('È presente un disturbo avanzato della conduzione atrioventricolare, potenzialmente clinicamente rilevante.');
-  if(codes.has('complete_av_block')) parts.push('È presente un blocco atrioventricolare completo, reperto clinicamente rilevante.');
-  if(codes.has('ventricular_ectopy')) parts.push('La presenza di extrasistoli ventricolari richiede un inquadramento cardiologico completo e, in funzione della complessità, la quantificazione mediante monitoraggio Holter.');
-  if(codes.has('supraventricular_ectopy')) parts.push('La presenza di extrasistoli sopraventricolari deve essere correlata al quadro cardiologico complessivo e alla loro frequenza.');
-  if(codes.has('atrial_fibrillation')) parts.push('La fibrillazione atriale richiede valutazione cardiologica completa e caratterizzazione della risposta ventricolare.');
-  if(codes.has('atrial_flutter')) parts.push('Il flutter atriale richiede valutazione cardiologica completa e caratterizzazione della conduzione atrioventricolare.');
-  if(codes.has('prolonged_qt')) parts.push('L’allungamento dell’intervallo QT deve essere correlato alla frequenza cardiaca, all’assetto elettrolitico e ai farmaci assunti.');
-  if(codes.has('short_qt')) parts.push('L’accorciamento dell’intervallo QT deve essere interpretato nel contesto clinico e metabolico.');
-  if(codes.has('left_axis_deviation')||codes.has('right_axis_deviation')) parts.push('La deviazione assiale deve essere correlata alla morfologia dei complessi QRS e agli eventuali reperti cardiaci strutturali.');
-  if(state.stSegment==='elevated'||state.stSegment==='depressed'||state.tWaveMorphology==='altered') parts.push('Le alterazioni della ripolarizzazione ventricolare sono aspecifiche e devono essere correlate al quadro clinico, metabolico e cardiologico.');
 
-  const hrText=heartRateInterpretationText(state);
-  if(hrText) parts.push(hrText);
+  if(buildAutomaticDiagnosis(state,species).summary==='Esame elettrocardiografico nei limiti della norma.'){
+    return 'Non si evidenziano alterazioni elettrocardiografiche di rilievo clinico.';
+  }
+
+  const parts=[];
+
+  if(codes.has('wandering_pacemaker')){
+    parts.push('Il pacemaker migrante rappresenta generalmente una variante fisiologica nel cane.');
+  }
+  if(codes.has('av_block_1')){
+    parts.push('È presente un ritardo della conduzione atrioventricolare, da correlare alla frequenza cardiaca e al quadro clinico.');
+  }
+  if(codes.has('av_block_2')){
+    parts.push('Il blocco atrioventricolare di II grado richiede caratterizzazione clinica e valutazione della risposta cronotropa.');
+  }
+  if(codes.has('advanced_av_block')){
+    parts.push('È presente un disturbo avanzato della conduzione atrioventricolare, potenzialmente clinicamente rilevante.');
+  }
+  if(codes.has('complete_av_block')){
+    parts.push('È presente un blocco atrioventricolare completo, reperto clinicamente rilevante.');
+  }
+  if(codes.has('ventricular_ectopy')){
+    parts.push('Le extrasistoli ventricolari richiedono inquadramento cardiologico e, in funzione della complessità, quantificazione mediante Holter.');
+  }
+  if(codes.has('supraventricular_ectopy')){
+    parts.push('Le extrasistoli sopraventricolari devono essere correlate alla loro frequenza e al quadro cardiologico complessivo.');
+  }
+  if(codes.has('atrial_fibrillation')){
+    parts.push('La fibrillazione atriale richiede valutazione cardiologica e caratterizzazione della risposta ventricolare.');
+  }
+  if(codes.has('atrial_flutter')){
+    parts.push('Il flutter atriale richiede valutazione cardiologica e caratterizzazione della conduzione atrioventricolare.');
+  }
+  if(codes.has('prolonged_qt')){
+    parts.push('L’allungamento del QT deve essere correlato a frequenza cardiaca, elettroliti e farmaci assunti.');
+  }
+  if(codes.has('short_qt')){
+    parts.push('L’accorciamento del QT deve essere interpretato nel contesto clinico e metabolico.');
+  }
+  if(codes.has('left_axis_deviation')||codes.has('right_axis_deviation')){
+    parts.push('La deviazione assiale deve essere correlata alla morfologia dei QRS e agli eventuali reperti cardiaci strutturali.');
+  }
+  if(state.stSegment==='elevated'||state.stSegment==='depressed'||state.tWaveMorphology==='altered'){
+    parts.push('Le alterazioni della ripolarizzazione sono aspecifiche e richiedono correlazione clinica, metabolica e cardiologica.');
+  }
 
   if(hasConcerningSymptoms(state)){
     if(codes.has('wandering_pacemaker')){
-      parts.push('I sintomi riferiti non devono essere attribuiti automaticamente al pacemaker migrante e richiedono un inquadramento clinico indipendente.');
+      parts.push('Il reperto ECG non giustifica da solo i sintomi riferiti, che richiedono un inquadramento clinico indipendente.');
     }else{
       parts.push('I sintomi riferiti devono essere correlati ai reperti ECG senza presumerne automaticamente un’origine aritmica.');
     }
@@ -1589,10 +1617,13 @@ function buildAutomaticConclusions(state,species=''){
     state.symptomMode==='present'&&
     (state.symptoms||[]).some(code=>['ataxia','behavioral_change'].includes(code))
   ){
-    parts.push('Atassia e alterazioni comportamentali non sono reperti specifici di malattia cardiaca e possono richiedere approfondimento extracardiologico.');
+    parts.push('In presenza di atassia o alterazioni comportamentali, considerare anche cause extracardiologiche.');
   }
 
-  if(!parts.length&&abnormal.length) parts.push('I reperti elettrocardiografici rilevati devono essere interpretati nel contesto clinico complessivo del paziente.');
+  if(!parts.length&&abnormal.length){
+    parts.push('I reperti elettrocardiografici devono essere interpretati nel contesto clinico complessivo.');
+  }
+
   return [...new Set(parts)].join(' ');
 }
 
@@ -1800,22 +1831,22 @@ async function generateEcgPdf(examId){
     addSectionTitle(title);
 
     doc.setFont('helvetica','normal');
-    doc.setFontSize(10.5);
+    doc.setFontSize(10.2);
     doc.setTextColor(28,39,44);
 
     prepared.forEach((lines,index)=>{
       lines.forEach(line=>{
         if(y+5>contentBottom) addNewPage();
         doc.setFont('helvetica','normal');
-        doc.setFontSize(10.5);
+        doc.setFontSize(10.2);
         doc.setTextColor(28,39,44);
         doc.text(line,margin,y);
-        y+=5;
+        y+=4.8;
       });
       if(index<prepared.length-1) y+=2;
     });
 
-    y+=6;
+    y+=4;
   };
 
   drawHeader();
