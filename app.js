@@ -1196,9 +1196,69 @@ function buildAutomaticRecommendations(state,species=''){
   return [...suggested];
 }
 
+function recommendationGroups(){
+  return [
+    {
+      title:'Cardiologia',
+      codes:[
+        'echocardiography',
+        'ecg_control',
+        'holter',
+        'atropine_test',
+        'continuous_ecg',
+        'cardiology_consult',
+        'hospitalization'
+      ]
+    },
+    {
+      title:'Laboratorio',
+      codes:[
+        'complete_blood_count',
+        'biochemistry',
+        'electrolytes',
+        'troponin',
+        'nt_probnp',
+        'blood_gas'
+      ]
+    },
+    {
+      title:'Urine',
+      codes:[
+        'urinalysis',
+        'upc_ratio',
+        'urine_culture'
+      ]
+    },
+    {
+      title:'Diagnostica complementare',
+      codes:[
+        'blood_pressure',
+        'thoracic_xrays',
+        'abdominal_ultrasound'
+      ]
+    }
+  ];
+}
+
+function groupedRecommendations(selections){
+  const selected=new Set(
+    (Array.isArray(selections)?selections:[]).filter(code=>code&&code!=='none')
+  );
+
+  return recommendationGroups()
+    .map(group=>({
+      title:group.title,
+      items:group.codes
+        .filter(code=>selected.has(code))
+        .map(code=>({code,label:recommendationLabel(code)}))
+    }))
+    .filter(group=>group.items.length);
+}
+
 function buildRecommendationText(selections){
-  const selected=(Array.isArray(selections)?selections:[])
-    .filter(Boolean);
+  const selected=[...new Set(
+    (Array.isArray(selections)?selections:[]).filter(Boolean)
+  )];
 
   if(!selected.length) return '';
 
@@ -1206,17 +1266,13 @@ function buildRecommendationText(selections){
     return 'Sulla base del solo esame elettrocardiografico non si ritengono necessari ulteriori approfondimenti.';
   }
 
-  const labels=selected.map(recommendationLabel);
-  let joined='';
-  if(labels.length===1){
-    joined=labels[0];
-  }else if(labels.length===2){
-    joined=`${labels[0]} e ${labels[1]}`;
-  }else{
-    joined=`${labels.slice(0,-1).join(', ')} e ${labels[labels.length-1]}`;
-  }
+  const groups=groupedRecommendations(selected);
+  if(!groups.length) return '';
 
-  return `Si consiglia l’esecuzione di ${joined}, da integrare con il quadro clinico e gli altri reperti diagnostici del paziente.`;
+  return groups.map(group=>{
+    const items=group.items.map(item=>`• ${item.label}`).join('\n');
+    return `${group.title}\n${items}`;
+  }).join('\n\n');
 }
 
 function recommendationsDot(state,species=''){
@@ -2053,7 +2109,12 @@ function ecgView(examId){
             return `<div class="notice">
               <b>VetCardio suggerisce</b>
               <div style="margin-top:10px">
-                ${auto.map(code=>`<div style="margin:7px 0">• ${esc(recommendationLabel(code))}</div>`).join('')}
+                ${groupedRecommendations(auto).map(group=>`
+                  <div style="margin:12px 0">
+                    <b>${esc(group.title)}</b>
+                    ${group.items.map(item=>`<div style="margin:7px 0">• ${esc(item.label)}</div>`).join('')}
+                  </div>
+                `).join('')}
               </div>
               <button type="button" class="secondary" style="margin-top:12px"
                 data-apply-auto-recommendations="${examId}">
@@ -2095,10 +2156,13 @@ function ecgView(examId){
             ${toggleButton(examId,'recommendationSelections','abdominal_ultrasound','Ecografia addominale',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
           </div>
 
-          <p><b>Gestione</b></p>
-          <div class="exam-grid">
+          <div class="exam-grid" style="margin-top:10px">
             ${toggleButton(examId,'recommendationSelections','cardiology_consult','Consulenza cardiologica',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
             ${toggleButton(examId,'recommendationSelections','hospitalization','Ricovero e monitoraggio',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
+          </div>
+
+          <p><b>Esito</b></p>
+          <div class="exam-grid">
             ${toggleButton(examId,'recommendationSelections','none','Nessun ulteriore approfondimento',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
           </div>
 
