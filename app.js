@@ -1685,38 +1685,40 @@ async function generateEcgPdf(examId){
   addSection('Conclusioni',report.conclusions);
   addSection('Raccomandazioni',report.recommendations);
 
-  ensureSpace(40);
-  doc.setDrawColor(205,218,222);
-  doc.line(margin,y,pageWidth-margin,y);
-  y+=7;
-
-  doc.setFont('helvetica','normal');
-  doc.setFontSize(8.5);
-  doc.setTextColor(90,107,117);
-  doc.text('Referto redatto con VetCardio e validato dal medico veterinario responsabile.',margin,y);
-  y+=12;
-
+  // Blocco firma compatto: non crea mai una pagina vuota solo per la firma.
   const veterinarianName=String(cfg.VETERINARIAN_NAME||'').trim();
   const veterinarianQualification=String(cfg.VETERINARIAN_QUALIFICATION||'Medico veterinario').trim();
+  const signatureSpace=18;
 
-  doc.setFont('helvetica','bold');
-  doc.setFontSize(9.5);
-  doc.setTextColor(44,61,70);
-  doc.text(veterinarianName||veterinarianQualification,margin,y);
+  if(y+signatureSpace<=contentBottom){
+    doc.setDrawColor(205,218,222);
+    doc.line(margin,y,pageWidth-margin,y);
+    y+=5;
 
-  if(veterinarianName&&veterinarianQualification){
     doc.setFont('helvetica','normal');
-    doc.setFontSize(8.5);
+    doc.setFontSize(7.8);
     doc.setTextColor(90,107,117);
-    doc.text(veterinarianQualification,margin,y+5);
-  }
+    doc.text('Referto validato dal medico veterinario responsabile.',margin,y);
 
-  doc.setDrawColor(120,135,142);
-  doc.line(pageWidth-78,y+7,pageWidth-margin,y+7);
-  doc.setFont('helvetica','normal');
-  doc.setFontSize(8);
-  doc.setTextColor(90,107,117);
-  doc.text('Firma',pageWidth-48,y+12,{align:'center'});
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(8.8);
+    doc.setTextColor(44,61,70);
+    doc.text(veterinarianName||veterinarianQualification,margin,y+6);
+
+    if(veterinarianName&&veterinarianQualification){
+      doc.setFont('helvetica','normal');
+      doc.setFontSize(7.8);
+      doc.setTextColor(90,107,117);
+      doc.text(veterinarianQualification,margin,y+10);
+    }
+
+    doc.setDrawColor(120,135,142);
+    doc.line(pageWidth-72,y+7,pageWidth-margin,y+7);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(90,107,117);
+    doc.text('Firma',pageWidth-45,y+11,{align:'center'});
+  }
 
   // Footer definitivo su tutte le pagine, con numero totale.
   const totalPages=doc.getNumberOfPages();
@@ -1730,7 +1732,7 @@ async function generateEcgPdf(examId){
     doc.setFontSize(8);
     doc.setTextColor(90,107,117);
     doc.text('VetCardio - Referto elettrocardiografico',margin,footerTextY);
-    doc.text(`Pagina ${page} di ${totalPages}`,pageWidth-margin,footerTextY,{align:'right'});
+    doc.text(`Pagina ${page} di ${totalPages}`,pageWidth-46,footerTextY,{align:'left'});
   }
 
   const filename=`VetCardio_ECG_${v.visit_date||'data'}_${safePdfFilename(owner.surname||'proprietario')}_${safePdfFilename(patientName)}.pdf`;
