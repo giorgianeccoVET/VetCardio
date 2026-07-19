@@ -243,6 +243,7 @@ function getEcgState(examId,exam=null){
     ecgUi[examId]={
       openStep:null,
       symptomMode:saved.symptomMode||'',
+      symptomPattern:saved.symptomPattern||'',
       symptoms:Array.isArray(saved.symptoms)?saved.symptoms:[],
       symptomFrequency:saved.symptomFrequency||'',
       symptomContext:saved.symptomContext||'',
@@ -252,6 +253,9 @@ function getEcgState(examId,exam=null){
       pToQrs:saved.pToQrs||'',
       qrsToP:saved.qrsToP||'',
       heartRate:saved.heartRate||'',
+      heartRateAssessment:saved.heartRateAssessment||'',
+      heartRateContext:saved.heartRateContext||'',
+      heartRateDecision:saved.heartRateDecision||'',
       rhythmOrigin:saved.rhythmOrigin||'',
       rhythmRegularity:saved.rhythmRegularity||'',
       pWaveMode:saved.pWaveMode||'',
@@ -318,8 +322,69 @@ function symptomLabel(value){
     dyspnea:'dispnea',
     cyanosis:'cianosi',
     restlessness:'irrequietezza',
+    ataxia:'atassia',
+    reduced_activity:'riduzione dell’attività',
+    behavioral_change:'alterazioni comportamentali',
+    persistent_weakness:'debolezza persistente',
     other:'altri episodi'
   })[value]||value;
+}
+
+
+function symptomPatternLabel(value){
+  return ({
+    paroxysmal:'episodici/parossistici',
+    recurrent:'ricorrenti',
+    persistent:'persistenti',
+    mixed:'misti',
+    uncertain:'non chiaramente classificabili'
+  })[value]||'';
+}
+
+function heartRateAssessmentLabel(value){
+  return ({
+    low:'frequenza cardiaca ridotta',
+    appropriate:'frequenza cardiaca adeguata al contesto',
+    high:'frequenza cardiaca aumentata',
+    not_assessed:'frequenza cardiaca non classificata'
+  })[value]||'';
+}
+
+function heartRateContextLabel(value){
+  return ({
+    resting:'a riposo',
+    awake:'da sveglio',
+    stressed:'in corso di stress o agitazione',
+    sedated:'in sedazione',
+    anesthetized:'in anestesia',
+    exercise:'durante o subito dopo esercizio',
+    unknown:'in contesto non definito'
+  })[value]||'';
+}
+
+function heartRateProposal(state){
+  if(!state.heartRateAssessment||state.heartRateAssessment==='not_assessed') return '';
+  const assessment=heartRateAssessmentLabel(state.heartRateAssessment);
+  const context=heartRateContextLabel(state.heartRateContext);
+  return `${assessment.charAt(0).toUpperCase()+assessment.slice(1)}${context?` ${context}`:''}.`;
+}
+
+function heartRateInterpretationText(state){
+  if(state.heartRateDecision!=='confirm') return '';
+  if(state.heartRateAssessment==='low'){
+    return 'Frequenza cardiaca ridotta rispetto al contesto di registrazione, da interpretare con il ritmo sottostante e il quadro clinico.';
+  }
+  if(state.heartRateAssessment==='high'){
+    return 'Frequenza cardiaca aumentata rispetto al contesto di registrazione, da interpretare distinguendo risposta fisiologica e tachiaritmia.';
+  }
+  if(state.heartRateAssessment==='appropriate'){
+    return 'Frequenza cardiaca adeguata al contesto di registrazione.';
+  }
+  return '';
+}
+
+function formatClinicalNumber(value){
+  return normalizeDisplayedRange(value).replace(/^-/, '−');
 }
 
 function symptomDot(state){
@@ -337,7 +402,7 @@ function hasConcerningSymptoms(state){
 
 function buildEcgHistoryText(state){
   if(state.symptomMode==='none'){
-    return 'Non vengono riferiti episodi compatibili con debolezza, sincope, collasso o intolleranza all’esercizio.';
+    return 'Non vengono riferiti sintomi o episodi di possibile rilievo cardiovascolare.';
   }
   if(state.symptomMode!=='present') return '';
 
@@ -351,6 +416,7 @@ function buildEcgHistoryText(state){
     .filter(Boolean);
 
   const parts=[];
+  const pattern=symptomPatternLabel(state.symptomPattern);
 
   if(symptoms.length){
     const joined=symptoms.length===1
@@ -358,26 +424,15 @@ function buildEcgHistoryText(state){
       : symptoms.length===2
         ? `${symptoms[0]} e ${symptoms[1]}`
         : `${symptoms.slice(0,-1).join(', ')} e ${symptoms[symptoms.length-1]}`;
-    parts.push(`Sono riferiti ${joined}.`);
+    parts.push(`Sono riferiti ${joined}${pattern?`, descritti come ${pattern}`:''}.`);
   }else{
-    parts.push('Sono riferiti episodi clinici non ancora caratterizzati.');
+    parts.push(`Sono riferiti sintomi clinici${pattern?` ${pattern}`:''} non ancora caratterizzati.`);
   }
 
-  if(state.symptomFrequency){
-    parts.push(`La frequenza riferita è ${String(state.symptomFrequency).trim()}.`);
-  }
-
-  if(state.symptomContext){
-    parts.push(`Gli episodi sono osservati ${String(state.symptomContext).trim()}.`);
-  }
-
-  if(state.symptomDuration){
-    parts.push(`La durata indicativa è ${String(state.symptomDuration).trim()}.`);
-  }
-
-  if(state.symptomRecovery){
-    parts.push(`Il recupero viene descritto come ${String(state.symptomRecovery).trim()}.`);
-  }
+  if(state.symptomFrequency) parts.push(`La frequenza riferita è ${String(state.symptomFrequency).trim()}.`);
+  if(state.symptomContext) parts.push(`I sintomi sono osservati ${String(state.symptomContext).trim()}.`);
+  if(state.symptomDuration) parts.push(`La durata indicativa è ${String(state.symptomDuration).trim()}.`);
+  if(state.symptomRecovery) parts.push(`Il recupero viene descritto come ${String(state.symptomRecovery).trim()}.`);
 
   return parts.join(' ');
 }
@@ -425,7 +480,7 @@ function buildEcgDescription(state){
   if(pq) parts.push(pq);
 
   if(state.heartRate){
-    parts.push(`Frequenza cardiaca di ${state.heartRate} bpm.`);
+    parts.push(`Frequenza cardiaca di ${formatClinicalNumber(state.heartRate)} bpm.`);
   }
 
   if(state.rhythmOrigin||state.rhythmRegularity){
@@ -546,7 +601,7 @@ function buildEcgDescription(state){
     }
 
     if(state.tWaveAmplitude){
-      sentence+=` (ampiezza ${normalizeDisplayedRange(state.tWaveAmplitude).replace('.',',')} mV)`;
+      sentence+=` (ampiezza ${formatClinicalNumber(state.tWaveAmplitude).replace('.',',')} mV)`;
     }
 
     parts.push(sentence+'.');
@@ -587,7 +642,10 @@ function buildEcgDescription(state){
 }
 
 function fcDot(state){
-  return state.heartRate?'🟢':'⚪';
+  if(!state.heartRate) return '⚪';
+  if(state.heartRateAssessment==='appropriate'&&state.heartRateDecision==='confirm') return '🟢';
+  if(state.heartRateAssessment) return '🟠';
+  return '🟡';
 }
 
 function rhythmDot(state){
@@ -1229,6 +1287,33 @@ function buildConsistencyChecks(state,species=''){
     );
   }
 
+  if(state.symptomPattern==='persistent'&&(state.symptomDuration||state.symptomRecovery)){
+    add(
+      'info',
+      'Sintomi persistenti con durata o recupero compilati',
+      'Per un’alterazione persistente, durata del singolo episodio e recupero possono non essere applicabili.',
+      ['Sintomi ed episodi riferiti']
+    );
+  }
+
+  if(state.heartRateAssessment==='low'&&state.heartRateDecision==='confirm'&&state.rhythmOrigin==='sinusale'&&state.heartRateContext==='stressed'){
+    add(
+      'warning',
+      'Frequenza ridotta durante stress',
+      'Una frequenza cardiaca ridotta in corso di stress o agitazione merita verifica clinica e correlazione con il ritmo.',
+      ['Frequenza cardiaca','Ritmo']
+    );
+  }
+
+  if((state.heartRateAssessment==='low'||state.heartRateAssessment==='high')&&!state.heartRateContext){
+    add(
+      'info',
+      'Contesto della frequenza non indicato',
+      'Specificare il contesto di registrazione prima di confermare una frequenza cardiaca ridotta o aumentata.',
+      ['Frequenza cardiaca']
+    );
+  }
+
   return checks;
 }
 
@@ -1259,6 +1344,8 @@ function recommendationLabel(code){
     blood_pressure:'Pressione arteriosa',
     thoracic_xrays:'Radiografie toraciche',
     cardiology_consult:'Consulenza cardiologica',
+    internal_medicine_assessment:'Valutazione internistica',
+    neurologic_assessment:'Valutazione neurologica',
     hospitalization:'Ricovero e monitoraggio',
     none:'Nessun ulteriore approfondimento'
   })[code]||code;
@@ -1270,8 +1357,21 @@ function buildAutomaticRecommendations(state,species=''){
   const symptoms=new Set(Array.isArray(state.symptoms)?state.symptoms:[]);
 
   if(state.symptomMode==='present'){
-    if(symptoms.has('weakness')||symptoms.has('exercise_intolerance')){
+    if(
+      symptoms.has('weakness')||
+      symptoms.has('persistent_weakness')||
+      symptoms.has('exercise_intolerance')||
+      symptoms.has('reduced_activity')
+    ){
       suggested.add('blood_pressure');
+      suggested.add('biochemistry');
+      suggested.add('electrolytes');
+    }
+
+    if(
+      (state.symptomPattern==='paroxysmal'||state.symptomPattern==='recurrent')&&
+      (symptoms.has('weakness')||symptoms.has('exercise_intolerance'))
+    ){
       suggested.add('ecg_control');
     }
 
@@ -1285,6 +1385,28 @@ function buildAutomaticRecommendations(state,species=''){
       suggested.add('echocardiography');
       suggested.add('thoracic_xrays');
     }
+
+    if(symptoms.has('ataxia')||symptoms.has('behavioral_change')){
+      suggested.add('neurologic_assessment');
+      suggested.add('internal_medicine_assessment');
+    }
+
+    if(
+      state.symptomPattern==='persistent'&&
+      (symptoms.has('persistent_weakness')||symptoms.has('reduced_activity')||symptoms.has('restlessness'))
+    ){
+      suggested.add('internal_medicine_assessment');
+    }
+  }
+
+  if(state.heartRateDecision==='confirm'&&state.heartRateAssessment==='low'){
+    suggested.add('ecg_control');
+    if(hasConcerningSymptoms(state)) suggested.add('holter');
+  }
+
+  if(state.heartRateDecision==='confirm'&&state.heartRateAssessment==='high'){
+    suggested.add('ecg_control');
+    if(state.rhythmRegularity==='irregolare') suggested.add('holter');
   }
 
   if(codes.has('av_block_1')){
@@ -1451,6 +1573,25 @@ function buildAutomaticConclusions(state,species=''){
   if(codes.has('short_qt')) parts.push('L’accorciamento dell’intervallo QT deve essere interpretato nel contesto clinico e metabolico.');
   if(codes.has('left_axis_deviation')||codes.has('right_axis_deviation')) parts.push('La deviazione assiale deve essere correlata alla morfologia dei complessi QRS e agli eventuali reperti cardiaci strutturali.');
   if(state.stSegment==='elevated'||state.stSegment==='depressed'||state.tWaveMorphology==='altered') parts.push('Le alterazioni della ripolarizzazione ventricolare sono aspecifiche e devono essere correlate al quadro clinico, metabolico e cardiologico.');
+
+  const hrText=heartRateInterpretationText(state);
+  if(hrText) parts.push(hrText);
+
+  if(hasConcerningSymptoms(state)){
+    if(codes.has('wandering_pacemaker')){
+      parts.push('I sintomi riferiti non devono essere attribuiti automaticamente al pacemaker migrante e richiedono un inquadramento clinico indipendente.');
+    }else{
+      parts.push('I sintomi riferiti devono essere correlati ai reperti ECG senza presumerne automaticamente un’origine aritmica.');
+    }
+  }
+
+  if(
+    state.symptomMode==='present'&&
+    (state.symptoms||[]).some(code=>['ataxia','behavioral_change'].includes(code))
+  ){
+    parts.push('Atassia e alterazioni comportamentali non sono reperti specifici di malattia cardiaca e possono richiedere approfondimento extracardiologico.');
+  }
+
   if(!parts.length&&abnormal.length) parts.push('I reperti elettrocardiografici rilevati devono essere interpretati nel contesto clinico complessivo del paziente.');
   return [...new Set(parts)].join(' ');
 }
@@ -1465,7 +1606,7 @@ function conclusionsDot(state,species=''){
 function buildReportCompleteness(state){
   const checks=[
     ['Relazione P–QRS', Boolean(state.pToQrs&&state.qrsToP)],
-    ['Frequenza cardiaca', Boolean(String(state.heartRate||'').trim())],
+    ['Frequenza cardiaca', Boolean(String(state.heartRate||'').trim()&&state.heartRateAssessment)],
     ['Ritmo', Boolean(state.rhythmOrigin&&state.rhythmRegularity)],
     ['Onda P', Boolean(state.pWaveMode)],
     ['QRS', Boolean(state.qrsMode)],
@@ -1793,6 +1934,10 @@ function buildEcgInterpretation(state,species=''){
     const sub=bav2SubtypeLabel(state.bav2Subtype);
     parts.push(sub?`La presenza di onde P non condotte è compatibile con blocco atrioventricolare di II grado (${sub}).`:'La presenza di onde P non condotte è compatibile con blocco atrioventricolare di II grado.');
   }
+
+  const hrInterpretation=heartRateInterpretationText(state);
+  if(hrInterpretation) parts.push(hrInterpretation);
+
   const axis=axisProposal(state,species);
   if(axis&&state.axisDecision==='confirm') parts.push(axis.sentence);
   return [...new Set(parts)].join(' ');
@@ -1888,6 +2033,15 @@ function ecgView(examId){
           </div>
 
           ${state.symptomMode==='present'?`
+            <p><b>Andamento</b></p>
+            <div class="exam-grid">
+              ${optionButton(examId,'symptomPattern','paroxysmal','Episodici / parossistici',state.symptomPattern)}
+              ${optionButton(examId,'symptomPattern','recurrent','Ricorrenti',state.symptomPattern)}
+              ${optionButton(examId,'symptomPattern','persistent','Persistenti',state.symptomPattern)}
+              ${optionButton(examId,'symptomPattern','mixed','Misti',state.symptomPattern)}
+              ${optionButton(examId,'symptomPattern','uncertain','Non classificabili',state.symptomPattern)}
+            </div>
+
             <p><b>Segni riferiti</b></p>
             <div class="exam-grid">
               ${toggleButton(examId,'symptoms','weakness','Debolezza',state.symptoms)}
@@ -1897,6 +2051,10 @@ function ecgView(examId){
               ${toggleButton(examId,'symptoms','dyspnea','Dispnea',state.symptoms)}
               ${toggleButton(examId,'symptoms','cyanosis','Cianosi',state.symptoms)}
               ${toggleButton(examId,'symptoms','restlessness','Irrequietezza',state.symptoms)}
+              ${toggleButton(examId,'symptoms','ataxia','Atassia',state.symptoms)}
+              ${toggleButton(examId,'symptoms','reduced_activity','Riduzione dell’attività',state.symptoms)}
+              ${toggleButton(examId,'symptoms','behavioral_change','Alterazioni comportamentali',state.symptoms)}
+              ${toggleButton(examId,'symptoms','persistent_weakness','Debolezza persistente',state.symptoms)}
               ${toggleButton(examId,'symptoms','other','Altro',state.symptoms)}
             </div>
 
@@ -1967,6 +2125,42 @@ function ecgView(examId){
               data-field="heartRate"
               placeholder="es. 92">
           </label>
+
+          <p><b>Valutazione rispetto al contesto</b></p>
+          <div class="exam-grid">
+            ${optionButton(examId,'heartRateAssessment','low','Ridotta',state.heartRateAssessment)}
+            ${optionButton(examId,'heartRateAssessment','appropriate','Adeguata',state.heartRateAssessment)}
+            ${optionButton(examId,'heartRateAssessment','high','Aumentata',state.heartRateAssessment)}
+            ${optionButton(examId,'heartRateAssessment','not_assessed','Non classificata',state.heartRateAssessment)}
+          </div>
+
+          <p><b>Contesto di registrazione</b></p>
+          <div class="exam-grid">
+            ${optionButton(examId,'heartRateContext','resting','A riposo',state.heartRateContext)}
+            ${optionButton(examId,'heartRateContext','awake','Da sveglio',state.heartRateContext)}
+            ${optionButton(examId,'heartRateContext','stressed','Stress / agitazione',state.heartRateContext)}
+            ${optionButton(examId,'heartRateContext','sedated','Sedazione',state.heartRateContext)}
+            ${optionButton(examId,'heartRateContext','anesthetized','Anestesia',state.heartRateContext)}
+            ${optionButton(examId,'heartRateContext','exercise','Dopo esercizio',state.heartRateContext)}
+            ${optionButton(examId,'heartRateContext','unknown','Non definito',state.heartRateContext)}
+          </div>
+
+          ${heartRateProposal(state)?`
+            <div class="notice" style="margin-top:14px">
+              <b>Valutazione proposta</b><br>
+              ${esc(heartRateProposal(state))}
+              <p><b>Confermi questa interpretazione?</b></p>
+              <div class="exam-grid">
+                ${optionButton(examId,'heartRateDecision','confirm','Confermo',state.heartRateDecision)}
+                ${optionButton(examId,'heartRateDecision','reject','Non confermo',state.heartRateDecision)}
+                ${optionButton(examId,'heartRateDecision','inconclusive','Non conclusivo',state.heartRateDecision)}
+              </div>
+            </div>
+          `:''}
+
+          <div class="notice" style="margin-top:14px">
+            VetCardio non assegna automaticamente bradicardia o tachicardia dal solo valore numerico: specie, stato di coscienza, stress, sedazione e ritmo devono essere considerati insieme.
+          </div>
         </div>
       `:''}
 
@@ -2560,6 +2754,8 @@ function ecgView(examId){
 
           <div class="exam-grid" style="margin-top:10px">
             ${toggleButton(examId,'recommendationSelections','cardiology_consult','Consulenza cardiologica',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
+            ${toggleButton(examId,'recommendationSelections','internal_medicine_assessment','Valutazione internistica',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
+            ${toggleButton(examId,'recommendationSelections','neurologic_assessment','Valutazione neurologica',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
             ${toggleButton(examId,'recommendationSelections','hospitalization','Ricovero e monitoraggio',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
           </div>
 
@@ -2912,6 +3108,7 @@ function bind(){
       }
 
       if(b.dataset.field==='symptomMode'&&b.dataset.value==='none'){
+        state.symptomPattern='';
         state.symptoms=[];
         state.symptomFrequency='';
         state.symptomContext='';
@@ -2922,6 +3119,13 @@ function bind(){
 
       if(b.dataset.field==='pWaveMode'&&b.dataset.value==='normal'){
         state.pWaveFindings=[];
+      }
+
+      if(
+        b.dataset.field==='heartRateAssessment'||
+        b.dataset.field==='heartRateContext'
+      ){
+        state.heartRateDecision='';
       }
 
       if(b.dataset.field==='axisEvaluability'&&b.dataset.value==='not_evaluable'){
@@ -3175,6 +3379,7 @@ function bind(){
       const payload={
         report_data:{
           symptomMode:state.symptomMode,
+          symptomPattern:state.symptomPattern,
           symptoms:state.symptoms,
           symptomFrequency:state.symptomFrequency,
           symptomContext:state.symptomContext,
@@ -3184,6 +3389,9 @@ function bind(){
           pToQrs:state.pToQrs,
           qrsToP:state.qrsToP,
           heartRate:state.heartRate,
+          heartRateAssessment:state.heartRateAssessment,
+          heartRateContext:state.heartRateContext,
+          heartRateDecision:state.heartRateDecision,
           rhythmOrigin:state.rhythmOrigin,
           rhythmRegularity:state.rhythmRegularity,
           pWaveMode:state.pWaveMode,
