@@ -9,6 +9,93 @@ let route={name:'home'};
 let patients=[];
 const ecgUi={};
 
+const ECG_DRAFT_PREFIX='vetcardio_ecg_draft_';
+
+function ecgDraftKey(examId){
+  return `${ECG_DRAFT_PREFIX}${examId}`;
+}
+
+function ecgDraftPayload(state){
+  const excluded=new Set([
+    'openStep','saving','saved',
+    'draftSavedAt','draftRestored','draftError'
+  ]);
+
+  return Object.fromEntries(
+    Object.entries(state)
+      .filter(([key])=>!excluded.has(key))
+  );
+}
+
+function saveEcgDraft(examId,state){
+  try{
+    const savedAt=new Date().toISOString();
+    localStorage.setItem(
+      ecgDraftKey(examId),
+      JSON.stringify({
+        version:1,
+        savedAt,
+        data:ecgDraftPayload(state)
+      })
+    );
+    state.draftSavedAt=savedAt;
+    state.draftError='';
+  }catch(error){
+    state.draftError='Impossibile salvare la bozza locale.';
+  }
+}
+
+function readEcgDraft(examId){
+  try{
+    const raw=localStorage.getItem(ecgDraftKey(examId));
+    if(!raw) return null;
+    const parsed=JSON.parse(raw);
+    if(!parsed||!parsed.data) return null;
+    return parsed;
+  }catch{
+    return null;
+  }
+}
+
+function removeEcgDraft(examId){
+  try{
+    localStorage.removeItem(ecgDraftKey(examId));
+  }catch{}
+}
+
+function ecgDraftTimeLabel(value){
+  if(!value) return '';
+  const date=new Date(value);
+  if(Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString('it-IT',{
+    hour:'2-digit',
+    minute:'2-digit',
+    second:'2-digit'
+  });
+}
+
+setInterval(()=>{
+  Object.entries(ecgUi).forEach(([examId,state])=>{
+    if(state&&!state.saved&&!state.saving){
+      saveEcgDraft(examId,state);
+      const status=document.querySelector(`[data-ecg-draft-status="${examId}"]`);
+      if(status){
+        status.textContent=state.draftError
+          ?state.draftError
+          :`Bozza salvata sul dispositivo alle ${ecgDraftTimeLabel(state.draftSavedAt)}.`;
+        status.className=state.draftError?'notice':'notice success';
+      }
+    }
+  });
+},900);
+
+window.addEventListener('beforeunload',event=>{
+  const hasUnsaved=Object.values(ecgUi).some(state=>state&&!state.saved&&!state.saving);
+  if(!hasUnsaved) return;
+  event.preventDefault();
+  event.returnValue='';
+});
+
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({
   '&':'&amp;',
   '<':'&lt;',
@@ -239,7 +326,12 @@ function normalizePrMode(value){
 
 function getEcgState(examId,exam=null){
   if(!ecgUi[examId]){
-    const saved=exam?.report_data||{};
+    const databaseSaved=exam?.report_data||{};
+    const localDraft=readEcgDraft(examId);
+    const saved=localDraft
+      ? {...databaseSaved,...localDraft.data}
+      : databaseSaved;
+
     ecgUi[examId]={
       openStep:null,
       symptomMode:saved.symptomMode||'',
@@ -312,7 +404,10 @@ function getEcgState(examId,exam=null){
       interpretation:exam?.interpretation||saved.interpretation||'',
       recommendations:exam?.recommendations||saved.recommendations||'',
       saved:false,
-      saving:false
+      saving:false,
+      draftSavedAt:localDraft?.savedAt||'',
+      draftRestored:Boolean(localDraft),
+      draftError:''
     };
   }
   return ecgUi[examId];
@@ -1322,13 +1417,39 @@ function buildConsistencyChecks(state,species=''){
     );
   }
 
-  if(state.bav2Decision==='confirm'&&state.prMode==='normal_constant'){
+  if(
+    state.bav2Decision==='confirm'&&
+    state.bav2Subtype==='mobitz2'&&
+    state.prMode==='progressive'
+  ){
     add(
-      'info',
-      'Verificare il sottotipo di BAV II',
-      'Nel BAV II il PR può essere normale e costante nei battiti condotti, come nel Mobitz II; verificare che il sottotipo selezionato sia coerente.',
+      'error',
+      'Mobitz II con progressivo allungamento del PR',
+      'Il progressivo allungamento dell’intervallo PR è più coerente con Mobitz I/Wenckebach. Ricontrollare il sottotipo selezionato.',
       ['Intervallo PR','Conduzione']
     );
+  }
+
+  if(
+    state.bav2Decision==='confirm'&&
+    state.bav2Subtype==='mobitz1'&&
+    ['normal_constant','variable_nonprogressive'].includes(state.prMode)
+  ){
+    add(
+      'warning',
+      'Mobitz I senza progressivo allungamento del PR',
+      'Nel Mobitz I è atteso un progressivo allungamento del PR prima dell’onda P non condotta.',
+      ['Intervallo PR','Conduzione']
+    );
+  }
+
+  if(
+    state.bav2Decision==='confirm'&&
+    state.bav2Subtype==='mobitz2'&&
+    state.prMode==='normal_constant'&&
+    state.pToQrs==='no'
+  ){
+    // Configurazione coerente: nessun avviso.
   }
 
   if(qrsWide&&state.conductionMode==='none'&&state.ectopyMode==='absent'){
@@ -1478,6 +1599,15 @@ function buildAutomaticRecommendations(state,species=''){
   if(codes.has('av_block_2')){
     suggested.add('echocardiography');
     suggested.add('atropine_test');
+    suggested.add('ecg_control');
+    suggested.add('electrolytes');
+
+    if(
+      hasConcerningSymptoms(state)||
+      ['mobitz2','high_grade','unclassified'].includes(state.bav2Subtype)
+    ){
+      suggested.add('holter');
+    }
   }
 
   if(codes.has('complete_av_block')||codes.has('advanced_av_block')){
@@ -3085,6 +3215,20 @@ function ecgView(examId){
     <textarea data-ecg-text="${examId}" data-field="recommendationText" placeholder="Approfondimenti consigliati">${esc(state.recommendationText||buildRecommendationText(state.recommendationSelections))}</textarea>
 
     ${state.saved?'<div class="notice success">ECG salvato correttamente.</div>':''}
+
+    <div
+      data-ecg-draft-status="${examId}"
+      class="${state.draftError?'notice':state.draftSavedAt||state.draftRestored?'notice success':'meta'}"
+      style="margin-top:12px">
+      ${state.draftError
+        ?esc(state.draftError)
+        :state.draftRestored
+          ?`Bozza locale ripristinata${state.draftSavedAt?` delle ${esc(ecgDraftTimeLabel(state.draftSavedAt))}`:''}.`
+          :state.draftSavedAt
+            ?`Bozza salvata sul dispositivo alle ${esc(ecgDraftTimeLabel(state.draftSavedAt))}.`
+            :'Le modifiche vengono salvate automaticamente sul dispositivo.'
+      }
+    </div>
   </section>
 
   <button class="btn fixed" data-save-ecg="${examId}">${state.saving?'Salvataggio…':'Salva ECG'}</button>
@@ -3713,6 +3857,10 @@ function bind(){
         return;
       }
 
+      removeEcgDraft(examId);
+      state.draftSavedAt='';
+      state.draftRestored=false;
+      state.draftError='';
       state.saved=true;
       render();
     };
