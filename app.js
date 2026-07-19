@@ -242,6 +242,13 @@ function getEcgState(examId,exam=null){
     const saved=exam?.report_data||{};
     ecgUi[examId]={
       openStep:null,
+      symptomMode:saved.symptomMode||'',
+      symptoms:Array.isArray(saved.symptoms)?saved.symptoms:[],
+      symptomFrequency:saved.symptomFrequency||'',
+      symptomContext:saved.symptomContext||'',
+      symptomDuration:saved.symptomDuration||'',
+      symptomRecovery:saved.symptomRecovery||'',
+      symptomNotes:saved.symptomNotes||'',
       pToQrs:saved.pToQrs||'',
       qrsToP:saved.qrsToP||'',
       heartRate:saved.heartRate||'',
@@ -299,6 +306,64 @@ function getEcgState(examId,exam=null){
     };
   }
   return ecgUi[examId];
+}
+
+
+function symptomLabel(value){
+  return ({
+    weakness:'episodi di debolezza',
+    syncope:'sincope',
+    collapse:'collasso',
+    exercise_intolerance:'intolleranza all’esercizio',
+    dyspnea:'dispnea',
+    cyanosis:'cianosi',
+    restlessness:'irrequietezza',
+    other:'altri episodi'
+  })[value]||value;
+}
+
+function symptomDot(state){
+  if(state.symptomMode==='none') return '🟢';
+  if(state.symptomMode==='present'&&state.symptoms.length) return '🟠';
+  if(state.symptomMode==='present') return '🟡';
+  return '⚪';
+}
+
+function hasConcerningSymptoms(state){
+  const symptoms=new Set(Array.isArray(state.symptoms)?state.symptoms:[]);
+  return ['weakness','syncope','collapse','exercise_intolerance','dyspnea','cyanosis']
+    .some(code=>symptoms.has(code));
+}
+
+function buildEcgHistoryText(state){
+  if(state.symptomMode==='none'){
+    return 'Non vengono riferiti episodi compatibili con debolezza, sincope, collasso o intolleranza all’esercizio.';
+  }
+  if(state.symptomMode!=='present') return '';
+
+  const symptoms=(Array.isArray(state.symptoms)?state.symptoms:[])
+    .map(symptomLabel)
+    .filter(Boolean);
+
+  const parts=[];
+  if(symptoms.length){
+    const joined=symptoms.length===1
+      ? symptoms[0]
+      : symptoms.length===2
+        ? `${symptoms[0]} e ${symptoms[1]}`
+        : `${symptoms.slice(0,-1).join(', ')} e ${symptoms[symptoms.length-1]}`;
+    parts.push(`Sono riferiti ${joined}.`);
+  }else{
+    parts.push('Sono riferiti episodi clinici non ancora caratterizzati.');
+  }
+
+  if(state.symptomFrequency) parts.push(`Frequenza: ${state.symptomFrequency}.`);
+  if(state.symptomContext) parts.push(`Circostanze: ${state.symptomContext}.`);
+  if(state.symptomDuration) parts.push(`Durata indicativa: ${state.symptomDuration}.`);
+  if(state.symptomRecovery) parts.push(`Recupero: ${state.symptomRecovery}.`);
+  if(state.symptomNotes) parts.push(state.symptomNotes.trim().replace(/[.]+$/, '')+'.');
+
+  return parts.join(' ');
 }
 
 function pqrsDot(state){
@@ -1149,6 +1214,25 @@ function recommendationLabel(code){
 function buildAutomaticRecommendations(state,species=''){
   const codes=clinicalFindingCodes(state,species);
   const suggested=new Set();
+  const symptoms=new Set(Array.isArray(state.symptoms)?state.symptoms:[]);
+
+  if(state.symptomMode==='present'){
+    if(symptoms.has('weakness')||symptoms.has('exercise_intolerance')){
+      suggested.add('blood_pressure');
+      suggested.add('ecg_control');
+    }
+
+    if(symptoms.has('syncope')||symptoms.has('collapse')){
+      suggested.add('blood_pressure');
+      suggested.add('holter');
+      suggested.add('echocardiography');
+    }
+
+    if(symptoms.has('dyspnea')||symptoms.has('cyanosis')){
+      suggested.add('echocardiography');
+      suggested.add('thoracic_xrays');
+    }
+  }
 
   if(codes.has('av_block_1')){
     suggested.add('ecg_control');
@@ -1197,11 +1281,11 @@ function buildAutomaticRecommendations(state,species=''){
   }
 
   const autoDiagnosis=buildAutomaticDiagnosis(state,species);
-  if(autoDiagnosis.summary==='ECG nei limiti della norma.'){
+  if(autoDiagnosis.summary==='Esame elettrocardiografico nei limiti della norma.'&&!hasConcerningSymptoms(state)){
     suggested.add('none');
   }
 
-  if(suggested.size>1&&suggested.has('none')){
+  if((suggested.size>1||hasConcerningSymptoms(state))&&suggested.has('none')){
     suggested.delete('none');
   }
 
@@ -1353,6 +1437,7 @@ function buildReportCompleteness(state){
 
 function buildFinalReport(state,species=''){
   return {
+    clinicalHistory: buildEcgHistoryText(state),
     description: buildEcgDescription(state),
     interpretation: buildEcgInterpretation(state,species),
     conclusions: buildAutomaticConclusions(state,species),
@@ -1417,6 +1502,7 @@ async function generateEcgPdf(examId){
   const state=getEcgState(examId,e);
   const automaticDiagnosis=buildAutomaticDiagnosis(state,p.species).summary||'';
   const report={
+    clinicalHistory:buildEcgHistoryText(state).trim(),
     description:String(state.description||buildEcgDescription(state)||'').trim(),
     diagnosis:String(state.diagnosisFinal||automaticDiagnosis||'').trim(),
     interpretation:String(state.interpretation||buildEcgInterpretation(state,p.species)||'').trim(),
@@ -1561,6 +1647,7 @@ async function generateEcgPdf(examId){
   if(v.reason) addLabelValue('Motivo',v.reason);
   y+=4;
 
+  if(report.clinicalHistory) addSection('Anamnesi aritmica',report.clinicalHistory);
   addSection('Descrizione elettrocardiografica',report.description);
   addSection('Diagnosi elettrocardiografica',report.diagnosis);
   addSection('Interpretazione elettrocardiografica',report.interpretation);
@@ -1665,6 +1752,7 @@ function ecgView(examId){
   }
 
   const steps=[
+    ['Anamnesi','Sintomi ed episodi riferiti',symptomDot(state),'anamnesi-ecg'],
     ['P-QRS','Relazione tra onde P e complessi QRS',pqrsDot(state),'pqrs'],
     ['FC','Frequenza cardiaca',fcDot(state),'fc'],
     ['Ritmo','Origine e regolarità',rhythmDot(state),'ritmo'],
@@ -1685,7 +1773,7 @@ function ecgView(examId){
   return `<section class="card">
     <div class="meta">${fmt(v.visit_date)} · ${esc(p.owners.surname)} – ${esc(p.name)}</div>
     <h2>ECG</h2>
-    <p class="meta">Il primo passaggio P–QRS è ora interattivo.</p>
+    <p class="meta">Compila anamnesi e tracciato: VetCardio integra reperti ECG e sintomi riferiti.</p>
   </section>
 
   <section class="card">
@@ -1702,6 +1790,66 @@ function ecgView(examId){
         </div>
         <span>${state.openStep===key?'⌄':'›'}</span>
       </div>
+
+      ${state.openStep===key&&key==='anamnesi-ecg'?`
+        <div class="card" style="margin:12px 0">
+          <h3>Anamnesi aritmica</h3>
+          <p class="meta">Questi dati orientano le raccomandazioni, ma non modificano automaticamente la diagnosi ECG.</p>
+
+          <div class="exam-grid">
+            ${optionButton(examId,'symptomMode','none','Nessun episodio riferito',state.symptomMode)}
+            ${optionButton(examId,'symptomMode','present','Episodi presenti',state.symptomMode)}
+          </div>
+
+          ${state.symptomMode==='present'?`
+            <p><b>Segni riferiti</b></p>
+            <div class="exam-grid">
+              ${toggleButton(examId,'symptoms','weakness','Debolezza',state.symptoms)}
+              ${toggleButton(examId,'symptoms','syncope','Sincope',state.symptoms)}
+              ${toggleButton(examId,'symptoms','collapse','Collasso',state.symptoms)}
+              ${toggleButton(examId,'symptoms','exercise_intolerance','Intolleranza all’esercizio',state.symptoms)}
+              ${toggleButton(examId,'symptoms','dyspnea','Dispnea',state.symptoms)}
+              ${toggleButton(examId,'symptoms','cyanosis','Cianosi',state.symptoms)}
+              ${toggleButton(examId,'symptoms','restlessness','Irrequietezza',state.symptoms)}
+              ${toggleButton(examId,'symptoms','other','Altro',state.symptoms)}
+            </div>
+
+            <div class="grid" style="margin-top:16px">
+              <label>Frequenza degli episodi
+                <input value="${esc(state.symptomFrequency)}"
+                  data-ecg-input="${examId}" data-field="symptomFrequency"
+                  placeholder="es. 2 volte al mese">
+              </label>
+              <label>Contesto
+                <input value="${esc(state.symptomContext)}"
+                  data-ecg-input="${examId}" data-field="symptomContext"
+                  placeholder="es. a riposo, durante esercizio">
+              </label>
+              <label>Durata
+                <input value="${esc(state.symptomDuration)}"
+                  data-ecg-input="${examId}" data-field="symptomDuration"
+                  placeholder="es. pochi secondi">
+              </label>
+              <label>Recupero
+                <input value="${esc(state.symptomRecovery)}"
+                  data-ecg-input="${examId}" data-field="symptomRecovery"
+                  placeholder="es. rapido e completo">
+              </label>
+            </div>
+
+            <label style="display:block;margin-top:14px">Note sull’episodio
+              <textarea rows="4" data-ecg-text="${examId}" data-field="symptomNotes"
+                placeholder="Descrizione libera degli episodi...">${esc(state.symptomNotes)}</textarea>
+            </label>
+          `:''}
+
+          ${buildEcgHistoryText(state)?`
+            <div class="notice" style="margin-top:14px">
+              <b>Sintesi anamnestica</b><br>${esc(buildEcgHistoryText(state))}
+            </div>
+          `:''}
+        </div>
+      `:''}
 
       ${state.openStep===key&&key==='pqrs'?`
         <div class="card" style="margin:12px 0">
@@ -2677,6 +2825,15 @@ function bind(){
         }
       }
 
+      if(b.dataset.field==='symptomMode'&&b.dataset.value==='none'){
+        state.symptoms=[];
+        state.symptomFrequency='';
+        state.symptomContext='';
+        state.symptomDuration='';
+        state.symptomRecovery='';
+        state.symptomNotes='';
+      }
+
       if(b.dataset.field==='pWaveMode'&&b.dataset.value==='normal'){
         state.pWaveFindings=[];
       }
@@ -2931,6 +3088,13 @@ function bind(){
 
       const payload={
         report_data:{
+          symptomMode:state.symptomMode,
+          symptoms:state.symptoms,
+          symptomFrequency:state.symptomFrequency,
+          symptomContext:state.symptomContext,
+          symptomDuration:state.symptomDuration,
+          symptomRecovery:state.symptomRecovery,
+          symptomNotes:state.symptomNotes,
           pToQrs:state.pToQrs,
           qrsToP:state.qrsToP,
           heartRate:state.heartRate,
