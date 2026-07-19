@@ -1119,6 +1119,13 @@ function recommendationLabel(code){
     electrolytes:'Elettroliti',
     troponin:'Troponina cardiaca',
     blood_gas:'Emogasanalisi',
+    complete_blood_count:'Emocromo completo',
+    biochemistry:'Profilo biochimico',
+    nt_probnp:'NT-proBNP',
+    urinalysis:'Esame urine completo',
+    upc_ratio:'Rapporto PU/CU',
+    urine_culture:'Urinocoltura',
+    abdominal_ultrasound:'Ecografia addominale',
     blood_pressure:'Pressione arteriosa',
     thoracic_xrays:'Radiografie toraciche',
     cardiology_consult:'Consulenza cardiologica',
@@ -1209,7 +1216,7 @@ function buildRecommendationText(selections){
     joined=`${labels.slice(0,-1).join(', ')} e ${labels[labels.length-1]}`;
   }
 
-  return `Si consiglia l’esecuzione di ${joined} al fine di approfondire i reperti elettrocardiografici rilevati.`;
+  return `Si consiglia l’esecuzione di ${joined}, da integrare con il quadro clinico e gli altri reperti diagnostici del paziente.`;
 }
 
 function recommendationsDot(state,species=''){
@@ -1233,7 +1240,7 @@ function buildAutomaticConclusions(state,species=''){
   const parts=[];
 
   if(codes.has('wandering_pacemaker')){
-    parts.push('Il pacemaker migrante può rappresentare una variante fisiologica nel cane ed è frequentemente associato a variazioni del tono autonomico.');
+    parts.push('Il reperto è compatibile con pacemaker migrante, condizione generalmente considerata una variante fisiologica nel cane in assenza di altre alterazioni cliniche o elettrocardiografiche. L’interpretazione deve essere sempre integrata con il quadro clinico del paziente e con gli eventuali accertamenti diagnostici.');
   }
 
   if(codes.has('av_block_1')){
@@ -1296,10 +1303,8 @@ function buildAutomaticConclusions(state,species=''){
     ? state.recommendationSelections
     : [];
 
-  if(selected.length&&!selected.includes('none')){
-    parts.push('Si raccomanda il completamento dell’iter diagnostico secondo gli approfondimenti selezionati.');
-  }else if(selected.includes('none')){
-    parts.push('Sulla base del solo esame elettrocardiografico non si ritengono necessari ulteriori approfondimenti.');
+  if(selected.includes('none') && !parts.length){
+    parts.push('Sulla base del solo esame elettrocardiografico non si evidenziano elementi che rendano necessari ulteriori approfondimenti.');
   }
 
   return [...new Set(parts)].join(' ');
@@ -2068,15 +2073,26 @@ function ecgView(examId){
 
           <p><b>Laboratorio</b></p>
           <div class="exam-grid">
+            ${toggleButton(examId,'recommendationSelections','complete_blood_count','Emocromo completo',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
+            ${toggleButton(examId,'recommendationSelections','biochemistry','Profilo biochimico',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
             ${toggleButton(examId,'recommendationSelections','electrolytes','Elettroliti',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
             ${toggleButton(examId,'recommendationSelections','troponin','Troponina cardiaca',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
+            ${toggleButton(examId,'recommendationSelections','nt_probnp','NT-proBNP',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
             ${toggleButton(examId,'recommendationSelections','blood_gas','Emogasanalisi',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
           </div>
 
-          <p><b>Diagnostica</b></p>
+          <p><b>Urine</b></p>
+          <div class="exam-grid">
+            ${toggleButton(examId,'recommendationSelections','urinalysis','Esame urine completo',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
+            ${toggleButton(examId,'recommendationSelections','upc_ratio','Rapporto PU/CU',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
+            ${toggleButton(examId,'recommendationSelections','urine_culture','Urinocoltura',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
+          </div>
+
+          <p><b>Diagnostica complementare</b></p>
           <div class="exam-grid">
             ${toggleButton(examId,'recommendationSelections','blood_pressure','Pressione arteriosa',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
             ${toggleButton(examId,'recommendationSelections','thoracic_xrays','Radiografie toraciche',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
+            ${toggleButton(examId,'recommendationSelections','abdominal_ultrasound','Ecografia addominale',state.recommendationSelections).replace('data-ecg-toggle','data-recommendation-toggle')}
           </div>
 
           <p><b>Gestione</b></p>
@@ -2188,11 +2204,11 @@ function ecgView(examId){
       </div>`;
     })()}
 
-    <h3>Descrizione</h3>
+    <h3>Descrizione elettrocardiografica</h3>
     <p class="meta">Il testo si aggiorna mentre compili.</p>
-    <textarea id="ecgDescription" data-ecg-text="${examId}" data-field="description" placeholder="Descrizione ECG">${esc(state.description)}</textarea>
+    <textarea id="ecgDescription" data-ecg-text="${examId}" data-field="description" placeholder="Descrizione elettrocardiografica">${esc(state.description)}</textarea>
 
-    <h3>Interpretazione</h3>
+    <h3>Interpretazione elettrocardiografica</h3>
     <textarea data-ecg-text="${examId}" data-field="interpretation" placeholder="Diagnosi elettrocardiografica">${esc(state.interpretation)}</textarea>
 
     <h3>Conclusioni</h3>
