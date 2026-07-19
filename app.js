@@ -299,6 +299,7 @@ function getEcgState(examId,exam=null){
       diagnosisReviewed:saved.diagnosisReviewed||'',
       recommendationSelections:Array.isArray(saved.recommendationSelections)?saved.recommendationSelections:[],
       recommendationText:saved.recommendationText||'',
+      recommendationApplyMessage:'',
       conclusionsText:saved.conclusionsText||'',
       conclusionsEdited:Boolean(saved.conclusionsEdited),
       reportUpdatedAt:saved.reportUpdatedAt||'',
@@ -371,14 +372,17 @@ function heartRateProposal(state){
 
 function heartRateInterpretationText(state){
   if(state.heartRateDecision!=='confirm') return '';
+  const context=heartRateContextLabel(state.heartRateContext);
+  const contextText=context?` (${context})`:'';
+
   if(state.heartRateAssessment==='low'){
-    return 'Frequenza cardiaca ridotta rispetto al contesto di registrazione, da interpretare con il ritmo sottostante e il quadro clinico.';
+    return `Frequenza cardiaca ridotta rispetto al contesto di registrazione${contextText}, da interpretare con il ritmo sottostante e il quadro clinico.`;
   }
   if(state.heartRateAssessment==='high'){
-    return 'Frequenza cardiaca aumentata rispetto al contesto di registrazione, da interpretare distinguendo risposta fisiologica e tachiaritmia.';
+    return `Frequenza cardiaca aumentata rispetto al contesto di registrazione${contextText}, da interpretare distinguendo risposta fisiologica e tachiaritmia.`;
   }
   if(state.heartRateAssessment==='appropriate'){
-    return 'Frequenza cardiaca adeguata al contesto di registrazione.';
+    return `Frequenza cardiaca adeguata al contesto di registrazione${contextText}.`;
   }
   return '';
 }
@@ -601,7 +605,15 @@ function buildEcgDescription(state){
     }
 
     if(state.tWaveAmplitude){
-      sentence+=` (ampiezza ${formatClinicalNumber(state.tWaveAmplitude).replace('.',',')} mV)`;
+      const rawAmplitude=String(state.tWaveAmplitude).trim();
+      const displayedAmplitude=formatClinicalNumber(rawAmplitude).replace('.',',');
+
+      if(isBiphasic&&rawAmplitude.startsWith('-')){
+        const absoluteAmplitude=displayedAmplitude.replace(/^-/, '');
+        sentence+=`, con componente negativa di ampiezza pari a ${absoluteAmplitude} mV`;
+      }else{
+        sentence+=` (ampiezza ${displayedAmplitude} mV)`;
+      }
     }
 
     parts.push(sentence+'.');
@@ -1472,13 +1484,21 @@ function recommendationGroups(){
     {
       title:'Cardiologia',
       codes:[
-        'echocardiography',
         'ecg_control',
         'holter',
-        'atropine_test',
         'continuous_ecg',
+        'echocardiography',
+        'atropine_test',
         'cardiology_consult',
         'hospitalization'
+      ]
+    },
+    {
+      title:'Diagnostica complementare',
+      codes:[
+        'blood_pressure',
+        'thoracic_xrays',
+        'abdominal_ultrasound'
       ]
     },
     {
@@ -1493,19 +1513,18 @@ function recommendationGroups(){
       ]
     },
     {
+      title:'Valutazioni cliniche',
+      codes:[
+        'internal_medicine_assessment',
+        'neurologic_assessment'
+      ]
+    },
+    {
       title:'Urine',
       codes:[
         'urinalysis',
         'upc_ratio',
         'urine_culture'
-      ]
-    },
-    {
-      title:'Diagnostica complementare',
-      codes:[
-        'blood_pressure',
-        'thoracic_xrays',
-        'abdominal_ultrasound'
       ]
     }
   ];
@@ -1849,6 +1868,72 @@ async function generateEcgPdf(examId){
     y+=4;
   };
 
+
+  const addRecommendationsSection=(selections,fallbackText='')=>{
+    const groups=groupedRecommendations(selections);
+
+    if(!groups.length){
+      addSection('Raccomandazioni',fallbackText||'—');
+      return;
+    }
+
+    const columnGap=8;
+    const columnWidth=(contentWidth-columnGap)/2;
+    const leftX=margin;
+    const rightX=margin+columnWidth+columnGap;
+
+    const preparedGroups=groups.map(group=>{
+      const itemLines=group.items.map(item=>splitLines(`• ${item.label}`,columnWidth));
+      const height=5.2+itemLines.reduce((sum,lines)=>sum+(lines.length*4.1),0)+2.2;
+      return {...group,itemLines,height};
+    });
+
+    const columns=[[],[]];
+    const heights=[0,0];
+
+    preparedGroups.forEach(group=>{
+      const target=heights[0]<=heights[1]?0:1;
+      columns[target].push(group);
+      heights[target]+=group.height;
+    });
+
+    const blockHeight=7+Math.max(...heights)+20; // include firma compatta
+    if(y+blockHeight>contentBottom) addNewPage();
+
+    addSectionTitle('Raccomandazioni');
+    const startY=y;
+
+    const drawColumn=(groupsInColumn,x)=>{
+      let columnY=startY;
+
+      groupsInColumn.forEach(group=>{
+        doc.setFont('helvetica','bold');
+        doc.setFontSize(9.2);
+        doc.setTextColor(15,91,107);
+        doc.text(group.title,x,columnY);
+        columnY+=4.8;
+
+        group.itemLines.forEach(lines=>{
+          doc.setFont('helvetica','normal');
+          doc.setFontSize(8.8);
+          doc.setTextColor(28,39,44);
+          lines.forEach(line=>{
+            doc.text(line,x,columnY);
+            columnY+=4.1;
+          });
+        });
+
+        columnY+=2.2;
+      });
+
+      return columnY;
+    };
+
+    const leftEnd=drawColumn(columns[0],leftX);
+    const rightEnd=drawColumn(columns[1],rightX);
+    y=Math.max(leftEnd,rightEnd)+2;
+  };
+
   drawHeader();
 
   doc.setFont('helvetica','bold');
@@ -1892,14 +1977,18 @@ async function generateEcgPdf(examId){
   addSection('Diagnosi elettrocardiografica',report.diagnosis);
   addSection('Interpretazione elettrocardiografica',report.interpretation);
   addSection('Conclusioni',report.conclusions);
-  addSection('Raccomandazioni',report.recommendations);
+  addRecommendationsSection(state.recommendationSelections,report.recommendations);
 
-  // Blocco firma compatto: non crea mai una pagina vuota solo per la firma.
+  // Firma mantenuta insieme al blocco finale quando lo spazio è disponibile.
   const veterinarianName=String(cfg.VETERINARIAN_NAME||'').trim();
   const veterinarianQualification=String(cfg.VETERINARIAN_QUALIFICATION||'Medico veterinario').trim();
   const signatureSpace=18;
 
-  if(y+signatureSpace<=contentBottom){
+  if(y+signatureSpace>contentBottom){
+    addNewPage();
+  }
+
+  {
     doc.setDrawColor(205,218,222);
     doc.line(margin,y,pageWidth-margin,y);
     y+=5;
@@ -2747,6 +2836,10 @@ function ecgView(examId){
                 data-apply-auto-recommendations="${examId}">
                 Applica i suggerimenti
               </button>
+              ${state.recommendationApplyMessage
+                ?`<div class="notice success" style="margin-top:12px">${esc(state.recommendationApplyMessage)}</div>`
+                :''
+              }
             </div>`;
           })()}
 
@@ -3360,6 +3453,7 @@ function bind(){
 
       state.recommendationSelections=list;
       state.recommendationText=buildRecommendationText(list);
+      state.recommendationApplyMessage='';
       if(!state.conclusionsEdited){
         state.conclusionsText=buildAutomaticConclusions(state,speciesForExam(examId));
       }
@@ -3375,6 +3469,7 @@ function bind(){
       const auto=buildAutomaticRecommendations(state,speciesForExam(examId));
       state.recommendationSelections=[...auto];
       state.recommendationText=buildRecommendationText(state.recommendationSelections);
+      state.recommendationApplyMessage=`${auto.length} ${auto.length===1?'raccomandazione applicata':'raccomandazioni applicate'}.`;
       if(!state.conclusionsEdited){
         state.conclusionsText=buildAutomaticConclusions(state,speciesForExam(examId));
       }
