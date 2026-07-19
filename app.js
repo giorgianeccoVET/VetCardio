@@ -382,7 +382,7 @@ function buildEcgDescription(state){
 
   const qrsMeasures=[];
   if(state.qrsDuration) qrsMeasures.push(`durata ${state.qrsDuration} ms`);
-  if(state.qrsAmplitude) qrsMeasures.push(`ampiezza ${state.qrsAmplitude} mV`);
+  if(state.qrsAmplitude) qrsMeasures.push(`ampiezza ${normalizeDisplayedRange(state.qrsAmplitude)} mV`);
   if(qrsMeasures.length) parts.push(`Misure del QRS: ${qrsMeasures.join(', ')}.`);
 
   if(state.prMode){
@@ -390,12 +390,12 @@ function buildEcgDescription(state){
     if(state.prMode==='not_evaluable'){
       parts.push('Intervallo PR non valutabile.');
     }else if(state.prValue){
-      parts.push(`Intervallo PR ${label}, pari a ${state.prValue} ms.`);
+      parts.push(`Intervallo PR ${label}, pari a ${normalizeDisplayedRange(state.prValue)} ms.`);
     }else{
       parts.push(`Intervallo PR ${label}.`);
     }
   }else if(state.prValue){
-    parts.push(`Intervallo PR pari a ${state.prValue} ms.`);
+    parts.push(`Intervallo PR pari a ${normalizeDisplayedRange(state.prValue)} ms.`);
   }
 
   if(state.ectopyMode==='none'){
@@ -430,7 +430,7 @@ function buildEcgDescription(state){
     if(state.tWaveMorphology==='altered') sentence+=' di morfologia alterata';
     if(polarity) sentence+=`${state.tWaveMorphology?', ': ' '}${polarity}`;
     if(findings.length) sentence+=`${state.tWaveMorphology||polarity?', ': ' '}${findings.join(', ')}`;
-    if(state.tWaveAmplitude) sentence+=` (ampiezza ${String(state.tWaveAmplitude).replace('.',',')} mV)`;
+    if(state.tWaveAmplitude) sentence+=` (ampiezza ${normalizeDisplayedRange(state.tWaveAmplitude).replace('.',',')} mV)`;
     parts.push(sentence+'.');
   }
 
@@ -439,17 +439,17 @@ function buildEcgDescription(state){
     if(state.qtMode==='not_evaluable'){
       parts.push('Intervallo QT non valutabile.');
     }else if(state.qtValue){
-      parts.push(`Intervallo QT ${label}, pari a ${String(state.qtValue).replace('.',',')} ms.`);
+      parts.push(`Intervallo QT ${label}, pari a ${normalizeDisplayedRange(state.qtValue).replace('.',',')} ms.`);
     }else{
       parts.push(`Intervallo QT ${label}.`);
     }
   }else if(state.qtValue){
-    parts.push(`Intervallo QT pari a ${String(state.qtValue).replace('.',',')} ms.`);
+    parts.push(`Intervallo QT pari a ${normalizeDisplayedRange(state.qtValue).replace('.',',')} ms.`);
   }
 
   if(state.qtcValue){
     const formula=qtcFormulaLabel(state.qtcFormula);
-    parts.push(`QT corretto pari a ${String(state.qtcValue).replace('.',',')} ms${formula?` secondo ${formula}`:''}.`);
+    parts.push(`QT corretto pari a ${normalizeDisplayedRange(state.qtcValue).replace('.',',')} ms${formula?` secondo ${formula}`:''}.`);
   }
 
   if(state.axisEvaluability==='not_evaluable'){
@@ -1415,12 +1415,23 @@ async function generateEcgPdf(examId){
   if(!p||!v||!e) throw new Error('Impossibile recuperare i dati del referto ECG.');
 
   const state=getEcgState(examId,e);
+  const automaticDiagnosis=buildAutomaticDiagnosis(state,p.species).summary||'';
   const report={
     description:String(state.description||buildEcgDescription(state)||'').trim(),
+    diagnosis:String(state.diagnosisFinal||automaticDiagnosis||'').trim(),
     interpretation:String(state.interpretation||buildEcgInterpretation(state,p.species)||'').trim(),
     conclusions:String(state.conclusionsText||buildAutomaticConclusions(state,p.species)||'').trim(),
     recommendations:String(state.recommendationText||buildRecommendationText(state.recommendationSelections)||'').trim()
   };
+
+  const missing=[];
+  if(!report.description) missing.push('descrizione elettrocardiografica');
+  if(!report.diagnosis) missing.push('diagnosi elettrocardiografica');
+  if(!report.interpretation) missing.push('interpretazione elettrocardiografica');
+
+  if(missing.length){
+    throw new Error(`Prima di generare il PDF completa: ${missing.join(', ')}.`);
+  }
 
   await loadExternalScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js');
   const jsPDF=window.jspdf?.jsPDF;
@@ -1439,7 +1450,7 @@ async function generateEcgPdf(examId){
   const patientName=p.name||'Paziente';
   const ownerName=[owner.surname,owner.name].filter(Boolean).join(' ');
   const sex=[p.sex,p.neutered===true?'sterilizzato':p.neutered===false?'intero':''].filter(Boolean).join(', ');
-  const weight=v.weight_kg!=null?`${String(v.weight_kg).replace('.',',')} kg`:'—';
+  const weight=v.weight_kg!=null?`${String(v.weight_kg).replace('.',',')} kg`:'';
 
   const drawFooter=()=>{
     doc.setDrawColor(205,218,222);
@@ -1534,7 +1545,7 @@ async function generateEcgPdf(examId){
     ['Paziente',[patientName,p.species,p.breed].filter(Boolean).join(' - ')],
     ...(p.age_text?[['Età',p.age_text]]:[]),
     ...(sex?[['Sesso',sex]]:[]),
-    ['Peso',weight]
+    ...(weight?[['Peso',weight]]:[])
   ];
   const identityBoxHeight=identityRows.length*6+9;
 
@@ -1546,11 +1557,12 @@ async function generateEcgPdf(examId){
   y+=5;
 
   addLabelValue('Data esame',fmt(v.visit_date));
-  addLabelValue('Clinica',v.clinic||'—');
-  addLabelValue('Motivo',v.reason||'—');
+  if(v.clinic) addLabelValue('Clinica',v.clinic);
+  if(v.reason) addLabelValue('Motivo',v.reason);
   y+=4;
 
   addSection('Descrizione elettrocardiografica',report.description);
+  addSection('Diagnosi elettrocardiografica',report.diagnosis);
   addSection('Interpretazione elettrocardiografica',report.interpretation);
   addSection('Conclusioni',report.conclusions);
   addSection('Raccomandazioni',report.recommendations);
@@ -1563,7 +1575,7 @@ async function generateEcgPdf(examId){
   doc.setFontSize(8.5);
   doc.setTextColor(90,107,117);
   doc.text('Referto redatto con VetCardio e validato dal medico veterinario responsabile.',margin,y);
-  y+=13;
+  y+=12;
 
   const veterinarianName=String(cfg.VETERINARIAN_NAME||'').trim();
   const veterinarianQualification=String(cfg.VETERINARIAN_QUALIFICATION||'Medico veterinario').trim();
@@ -1587,7 +1599,7 @@ async function generateEcgPdf(examId){
 
   drawFooter();
 
-  const filename=`ECG_${safePdfFilename(owner.surname)}_${safePdfFilename(patientName)}_${v.visit_date||'data'}.pdf`;
+  const filename=`VetCardio_ECG_${v.visit_date||'data'}_${safePdfFilename(owner.surname||'proprietario')}_${safePdfFilename(patientName)}.pdf`;
   doc.save(filename);
 }
 
@@ -2441,7 +2453,7 @@ function ecgView(examId){
   </section>
 
   <button class="btn fixed" data-save-ecg="${examId}">${state.saving?'Salvataggio…':'Salva ECG'}</button>
-  <button class="btn secondary" data-generate-ecg-pdf="${examId}">Genera PDF</button>
+  <button class="btn secondary" data-generate-ecg-pdf="${examId}">Esporta referto PDF</button>
   <button class="btn secondary" data-back-visit="${v.id}">Torna alla visita</button>`;
 }
 
