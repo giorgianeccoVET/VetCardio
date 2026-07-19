@@ -373,16 +373,16 @@ function heartRateProposal(state){
 function heartRateInterpretationText(state){
   if(state.heartRateDecision!=='confirm') return '';
   const context=heartRateContextLabel(state.heartRateContext);
-  const contextText=context?` (${context})`:'';
+  const contextText=context?` nel contesto di ${context}`:' rispetto al contesto di registrazione';
 
   if(state.heartRateAssessment==='low'){
-    return `Frequenza cardiaca ridotta rispetto al contesto di registrazione${contextText}, da interpretare con il ritmo sottostante e il quadro clinico.`;
+    return `Frequenza cardiaca ridotta${contextText}, da interpretare con il ritmo sottostante e il quadro clinico.`;
   }
   if(state.heartRateAssessment==='high'){
-    return `Frequenza cardiaca aumentata rispetto al contesto di registrazione${contextText}, da interpretare distinguendo risposta fisiologica e tachiaritmia.`;
+    return `Frequenza cardiaca aumentata${contextText}, da interpretare distinguendo risposta fisiologica e tachiaritmia.`;
   }
   if(state.heartRateAssessment==='appropriate'){
-    return `Frequenza cardiaca adeguata al contesto di registrazione${contextText}.`;
+    return `Frequenza cardiaca adeguata${contextText}.`;
   }
   return '';
 }
@@ -1771,12 +1771,12 @@ async function generateEcgPdf(examId){
   const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
   const pageWidth=210;
   const pageHeight=297;
-  const margin=18;
+  const margin=13;
   const contentWidth=pageWidth-(margin*2);
-  const contentBottom=278;
-  const footerLineY=283;
-  const footerTextY=289;
-  let y=18;
+  const contentBottom=282;
+  const footerLineY=286;
+  const footerTextY=292;
+  let y=14;
 
   const owner=p.owners||{};
   const patientName=p.name||'Paziente';
@@ -1787,22 +1787,22 @@ async function generateEcgPdf(examId){
   const drawHeader=()=>{
     doc.setTextColor(15,91,107);
     doc.setFont('helvetica','bold');
-    doc.setFontSize(20);
+    doc.setFontSize(16);
     doc.text('VetCardio',margin,y);
 
-    doc.setFontSize(8.5);
+    doc.setFontSize(7.4);
     doc.setTextColor(90,107,117);
-    doc.text('ARCHIVIO CLINICO VETERINARIO',margin,y+5);
+    doc.text('ARCHIVIO CLINICO VETERINARIO',margin,y+4.5);
 
     doc.setDrawColor(15,91,107);
-    doc.setLineWidth(0.6);
-    doc.line(margin,y+9,pageWidth-margin,y+9);
-    y+=18;
+    doc.setLineWidth(0.5);
+    doc.line(margin,y+7.5,pageWidth-margin,y+7.5);
+    y+=13;
   };
 
   const addNewPage=()=>{
     doc.addPage();
-    y=18;
+    y=14;
     drawHeader();
   };
 
@@ -1814,13 +1814,13 @@ async function generateEcgPdf(examId){
     return doc.splitTextToSize(String(value||'—'),width);
   };
 
-  const addInfoRow=(label,value,labelWidth=43)=>{
+  const addInfoRow=(label,value,labelWidth=38)=>{
     const lines=splitLines(value,contentWidth-labelWidth);
-    const rowHeight=Math.max(6,lines.length*4.6);
+    const rowHeight=Math.max(4.8,lines.length*4);
     ensureSpace(rowHeight+1);
 
     doc.setFont('helvetica','bold');
-    doc.setFontSize(9.5);
+    doc.setFontSize(8.6);
     doc.setTextColor(44,61,70);
     doc.text(label,margin,y);
 
@@ -1833,10 +1833,10 @@ async function generateEcgPdf(examId){
   const addSectionTitle=title=>{
     ensureSpace(15);
     doc.setFont('helvetica','bold');
-    doc.setFontSize(12);
+    doc.setFontSize(10.3);
     doc.setTextColor(15,91,107);
     doc.text(title,margin,y);
-    y+=7;
+    y+=5;
   };
 
   const addSection=(title,text)=>{
@@ -1845,27 +1845,27 @@ async function generateEcgPdf(examId){
     const prepared=paragraphs.map(paragraph=>splitLines(paragraph));
 
     // Evita che il titolo resti isolato a fondo pagina.
-    const firstParagraphHeight=(prepared[0]?.length||1)*5;
-    ensureSpace(Math.min(15+firstParagraphHeight,45));
+    const firstParagraphHeight=(prepared[0]?.length||1)*4.1;
+    ensureSpace(Math.min(11+firstParagraphHeight,36));
     addSectionTitle(title);
 
     doc.setFont('helvetica','normal');
-    doc.setFontSize(10.2);
+    doc.setFontSize(9.1);
     doc.setTextColor(28,39,44);
 
     prepared.forEach((lines,index)=>{
       lines.forEach(line=>{
-        if(y+5>contentBottom) addNewPage();
+        if(y+4.2>contentBottom) addNewPage();
         doc.setFont('helvetica','normal');
-        doc.setFontSize(10.2);
+        doc.setFontSize(9.1);
         doc.setTextColor(28,39,44);
         doc.text(line,margin,y);
-        y+=4.8;
+        y+=4;
       });
-      if(index<prepared.length-1) y+=2;
+      if(index<prepared.length-1) y+=1;
     });
 
-    y+=4;
+    y+=2.2;
   };
 
 
@@ -1877,14 +1877,14 @@ async function generateEcgPdf(examId){
       return;
     }
 
-    const columnGap=8;
+    const columnGap=5;
     const columnWidth=(contentWidth-columnGap)/2;
     const leftX=margin;
     const rightX=margin+columnWidth+columnGap;
 
     const preparedGroups=groups.map(group=>{
       const itemLines=group.items.map(item=>splitLines(`• ${item.label}`,columnWidth));
-      const height=5.2+itemLines.reduce((sum,lines)=>sum+(lines.length*4.1),0)+2.2;
+      const height=4.2+itemLines.reduce((sum,lines)=>sum+(lines.length*3.45),0)+1.2;
       return {...group,itemLines,height};
     });
 
@@ -1897,8 +1897,8 @@ async function generateEcgPdf(examId){
       heights[target]+=group.height;
     });
 
-    const blockHeight=7+Math.max(...heights)+20; // include firma compatta
-    if(y+blockHeight>contentBottom) addNewPage();
+    const blockHeight=5+Math.max(...heights)+14; // include firma compatta
+    if(y+blockHeight>contentBottom&&contentBottom-y<24) addNewPage();
 
     addSectionTitle('Raccomandazioni');
     const startY=y;
@@ -1908,22 +1908,22 @@ async function generateEcgPdf(examId){
 
       groupsInColumn.forEach(group=>{
         doc.setFont('helvetica','bold');
-        doc.setFontSize(9.2);
+        doc.setFontSize(8.2);
         doc.setTextColor(15,91,107);
         doc.text(group.title,x,columnY);
-        columnY+=4.8;
+        columnY+=3.7;
 
         group.itemLines.forEach(lines=>{
           doc.setFont('helvetica','normal');
-          doc.setFontSize(8.8);
+          doc.setFontSize(7.1);
           doc.setTextColor(28,39,44);
           lines.forEach(line=>{
             doc.text(line,x,columnY);
-            columnY+=4.1;
+            columnY+=3.4;
           });
         });
 
-        columnY+=2.2;
+        columnY+=1.1;
       });
 
       return columnY;
@@ -1937,10 +1937,10 @@ async function generateEcgPdf(examId){
   drawHeader();
 
   doc.setFont('helvetica','bold');
-  doc.setFontSize(16);
+  doc.setFontSize(13.5);
   doc.setTextColor(20,45,52);
   doc.text('Referto elettrocardiografico',margin,y);
-  y+=11;
+  y+=8;
 
   const identityRows=[
     ['Proprietario',ownerName||'—'],
@@ -1952,9 +1952,9 @@ async function generateEcgPdf(examId){
   ];
 
   const identityBoxHeight=identityRows.reduce((sum,[,value])=>{
-    const lines=splitLines(value,contentWidth-43);
-    return sum+Math.max(6,lines.length*4.6);
-  },9);
+    const lines=splitLines(value,contentWidth-38);
+    return sum+Math.max(4.8,lines.length*4);
+  },6);
 
   ensureSpace(identityBoxHeight+8);
   doc.setFillColor(246,250,251);
@@ -1962,7 +1962,7 @@ async function generateEcgPdf(examId){
   doc.roundedRect(margin,y-4,contentWidth,identityBoxHeight,3,3,'FD');
   y+=3;
   identityRows.forEach(([label,value])=>addInfoRow(label,value));
-  y+=5;
+  y+=2.5;
 
   const examRows=[
     ['Data esame',fmt(v.visit_date)],
@@ -1970,7 +1970,7 @@ async function generateEcgPdf(examId){
     ...(v.reason?[['Motivo',v.reason]]:[])
   ];
   examRows.forEach(([label,value])=>addInfoRow(label,value));
-  y+=5;
+  y+=2.5;
 
   if(report.clinicalHistory) addSection('Sintomi ed episodi riferiti',report.clinicalHistory);
   addSection('Descrizione elettrocardiografica',report.description);
@@ -1982,7 +1982,7 @@ async function generateEcgPdf(examId){
   // Firma mantenuta insieme al blocco finale quando lo spazio è disponibile.
   const veterinarianName=String(cfg.VETERINARIAN_NAME||'').trim();
   const veterinarianQualification=String(cfg.VETERINARIAN_QUALIFICATION||'Medico veterinario').trim();
-  const signatureSpace=18;
+  const signatureSpace=13;
 
   if(y+signatureSpace>contentBottom){
     addNewPage();
@@ -1991,7 +1991,7 @@ async function generateEcgPdf(examId){
   {
     doc.setDrawColor(205,218,222);
     doc.line(margin,y,pageWidth-margin,y);
-    y+=5;
+    y+=3.5;
 
     doc.setFont('helvetica','normal');
     doc.setFontSize(7.8);
@@ -1999,13 +1999,13 @@ async function generateEcgPdf(examId){
     doc.text('Referto validato dal medico veterinario responsabile.',margin,y);
 
     doc.setFont('helvetica','bold');
-    doc.setFontSize(8.8);
+    doc.setFontSize(8);
     doc.setTextColor(44,61,70);
     doc.text(veterinarianName||veterinarianQualification,margin,y+6);
 
     if(veterinarianName&&veterinarianQualification){
       doc.setFont('helvetica','normal');
-      doc.setFontSize(7.8);
+      doc.setFontSize(7.1);
       doc.setTextColor(90,107,117);
       doc.text(veterinarianQualification,margin,y+10);
     }
