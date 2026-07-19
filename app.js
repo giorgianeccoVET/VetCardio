@@ -367,7 +367,7 @@ function buildEcgDescription(state){
 
   const measures=[];
   if(state.pWaveDuration) measures.push(`durata ${state.pWaveDuration} ms`);
-  if(state.pWaveAmplitude) measures.push(`ampiezza ${state.pWaveAmplitude} mV`);
+  if(state.pWaveAmplitude) measures.push(`ampiezza ${normalizeDisplayedRange(state.pWaveAmplitude)} mV`);
   if(measures.length) parts.push(`Misure dell’onda P: ${measures.join(', ')}.`);
 
   if(state.qrsMode==='normal'){
@@ -607,6 +607,8 @@ function tWaveFindingLabel(value){
     notched:'incisurata',
     asymmetric:'asimmetrica',
     variable:'variabile',
+    tall:'alta',
+    biphasic:'bifasica',
     other:'con altra alterazione'
   })[value]||value;
 }
@@ -1391,6 +1393,21 @@ function safePdfFilename(value){
     .slice(0,80)||'referto';
 }
 
+function normalizeDisplayedRange(value){
+  const raw=String(value??'').trim();
+  const match=raw.match(/^\s*([+-]?\d+(?:[.,]\d+)?)\s*[-–—]\s*([+-]?\d+(?:[.,]\d+)?)\s*$/);
+  if(!match) return raw;
+
+  const first=Number(match[1].replace(',','.'));
+  const second=Number(match[2].replace(',','.'));
+  if(!Number.isFinite(first)||!Number.isFinite(second)) return raw;
+
+  const format=n=>String(n).replace('.',',');
+  const min=Math.min(first,second);
+  const max=Math.max(first,second);
+  return `${format(min)}–${format(max)}`;
+}
+
 async function generateEcgPdf(examId){
   const p=patients.find(patient=>(patient.visits||[]).some(visit=>(visit.exams||[]).some(exam=>exam.id===examId)));
   const v=p?.visits?.find(visit=>(visit.exams||[]).some(exam=>exam.id===examId));
@@ -1512,14 +1529,20 @@ async function generateEcgPdf(examId){
   doc.text('Referto elettrocardiografico',margin,y);
   y+=11;
 
+  const identityRows=[
+    ['Proprietario',ownerName||'—'],
+    ['Paziente',[patientName,p.species,p.breed].filter(Boolean).join(' - ')],
+    ...(p.age_text?[['Età',p.age_text]]:[]),
+    ...(sex?[['Sesso',sex]]:[]),
+    ['Peso',weight]
+  ];
+  const identityBoxHeight=identityRows.length*6+9;
+
   doc.setFillColor(246,250,251);
   doc.setDrawColor(211,223,227);
-  doc.roundedRect(margin,y-4,contentWidth,45,3,3,'FD');
+  doc.roundedRect(margin,y-4,contentWidth,identityBoxHeight,3,3,'FD');
   y+=3;
-  addLabelValue('Proprietario',ownerName||'—');
-  addLabelValue('Paziente',[patientName,p.species,p.breed].filter(Boolean).join(' - '));
-  addLabelValue('Età / sesso',[p.age_text,sex].filter(Boolean).join(' - ')||'—');
-  addLabelValue('Peso',weight);
+  identityRows.forEach(([label,value])=>addLabelValue(label,value));
   y+=5;
 
   addLabelValue('Data esame',fmt(v.visit_date));
@@ -1532,14 +1555,35 @@ async function generateEcgPdf(examId){
   addSection('Conclusioni',report.conclusions);
   addSection('Raccomandazioni',report.recommendations);
 
-  ensureSpace(20);
+  ensureSpace(38);
   doc.setDrawColor(205,218,222);
   doc.line(margin,y,pageWidth-margin,y);
   y+=7;
   doc.setFont('helvetica','normal');
   doc.setFontSize(8.5);
   doc.setTextColor(90,107,117);
-  doc.text('Referto generato da VetCardio. Il contenuto deve essere validato dal medico veterinario responsabile.',margin,y);
+  doc.text('Referto redatto con VetCardio e validato dal medico veterinario responsabile.',margin,y);
+  y+=13;
+
+  const veterinarianName=String(cfg.VETERINARIAN_NAME||'').trim();
+  const veterinarianQualification=String(cfg.VETERINARIAN_QUALIFICATION||'Medico veterinario').trim();
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(9.5);
+  doc.setTextColor(44,61,70);
+  doc.text(veterinarianName||veterinarianQualification,margin,y);
+  if(veterinarianName&&veterinarianQualification){
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(90,107,117);
+    doc.text(veterinarianQualification,margin,y+5);
+  }
+
+  doc.setDrawColor(120,135,142);
+  doc.line(pageWidth-78,y+7,pageWidth-margin,y+7);
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(8);
+  doc.setTextColor(90,107,117);
+  doc.text('Firma',pageWidth-48,y+12,{align:'center'});
 
   drawFooter();
 
