@@ -254,7 +254,11 @@ function getEcgState(examId,exam=null){
       qrsToP:saved.qrsToP||'',
       heartRate:saved.heartRate||'',
       heartRateAssessment:saved.heartRateAssessment||'',
-      heartRateContext:saved.heartRateContext||'',
+      heartRateContexts:Array.isArray(saved.heartRateContexts)
+        ? saved.heartRateContexts
+        : saved.heartRateContext
+          ? [saved.heartRateContext]
+          : [],
       heartRateDecision:saved.heartRateDecision||'',
       rhythmOrigin:saved.rhythmOrigin||'',
       rhythmRegularity:saved.rhythmRegularity||'',
@@ -271,6 +275,7 @@ function getEcgState(examId,exam=null){
       wanderingDecision:saved.wanderingDecision||'',
       bav1Decision:saved.bav1Decision||'',
       conductionMode:saved.conductionMode||'',
+      conductionNotes:saved.conductionNotes||'',
       bav2Subtype:saved.bav2Subtype||'',
       bav2Decision:saved.bav2Decision||'',
       ectopyMode:saved.ectopyMode||'',
@@ -287,7 +292,7 @@ function getEcgState(examId,exam=null){
       qtMode:saved.qtMode||'',
       qtValue:saved.qtValue||'',
       qtcValue:saved.qtcValue||'',
-      qtcFormula:saved.qtcFormula||'',
+      qtcFormula:saved.qtcFormula||'fridericia',
       axisEvaluability:saved.axisEvaluability||'',
       axisPosition:saved.axisPosition||'right_lateral',
       axisMethod:saved.axisMethod||'',
@@ -366,14 +371,14 @@ function heartRateContextLabel(value){
 function heartRateProposal(state){
   if(!state.heartRateAssessment||state.heartRateAssessment==='not_assessed') return '';
   const assessment=heartRateAssessmentLabel(state.heartRateAssessment);
-  const context=heartRateContextLabel(state.heartRateContext);
+  const context=heartRateContextPhrase(state.heartRateContexts);
   return `${assessment.charAt(0).toUpperCase()+assessment.slice(1)}${context?` ${context}`:''}.`;
 }
 
 function heartRateInterpretationText(state){
   if(state.heartRateDecision!=='confirm') return '';
-  const context=heartRateContextLabel(state.heartRateContext);
-  const contextText=context?` nel contesto di ${context}`:' rispetto al contesto di registrazione';
+  const context=heartRateContextPhrase(state.heartRateContexts);
+  const contextText=context?` nel paziente ${context}`:' rispetto al contesto di registrazione';
 
   if(state.heartRateAssessment==='low'){
     return `Frequenza cardiaca ridotta${contextText}, da interpretare con il ritmo sottostante e il quadro clinico.`;
@@ -385,6 +390,41 @@ function heartRateInterpretationText(state){
     return `Frequenza cardiaca adeguata${contextText}.`;
   }
   return '';
+}
+
+
+function heartRateContextLabels(values){
+  const list=Array.isArray(values)?values:[];
+  return list.map(heartRateContextLabel).filter(Boolean);
+}
+
+function heartRateContextPhrase(values){
+  const labels=heartRateContextLabels(values);
+  if(!labels.length) return '';
+  if(labels.length===1) return labels[0];
+  if(labels.length===2) return `${labels[0]} e ${labels[1]}`;
+  return `${labels.slice(0,-1).join(', ')} e ${labels.at(-1)}`;
+}
+
+function calculateQtc(qtMs,heartRate,formula='fridericia'){
+  const qt=Number(String(qtMs||'').replace(',','.'));
+  const hr=Number(String(heartRate||'').replace(',','.'));
+  if(!Number.isFinite(qt)||qt<=0||!Number.isFinite(hr)||hr<=0) return '';
+  const rr=60/hr;
+  const corrected=formula==='bazett'
+    ? qt/Math.sqrt(rr)
+    : qt/Math.cbrt(rr);
+  return String(Math.round(corrected));
+}
+
+function refreshAutomaticQtc(state){
+  if(!state.qtValue||!state.heartRate){
+    state.qtcValue='';
+    return;
+  }
+  const formula=state.qtcFormula||'fridericia';
+  state.qtcFormula=formula;
+  state.qtcValue=calculateQtc(state.qtValue,state.heartRate,formula);
 }
 
 function formatClinicalNumber(value){
@@ -536,6 +576,11 @@ function buildEcgDescription(state){
     }
   }else if(state.prValue){
     parts.push(`Intervallo PR pari a ${normalizeDisplayedRange(state.prValue)} ms.`);
+  }
+
+  if(state.conductionNotes){
+    const note=String(state.conductionNotes).trim();
+    if(note) parts.push(note.endsWith('.')?note:`${note}.`);
   }
 
   if(state.ectopyMode==='none'){
@@ -1308,7 +1353,7 @@ function buildConsistencyChecks(state,species=''){
     );
   }
 
-  if(state.heartRateAssessment==='low'&&state.heartRateDecision==='confirm'&&state.rhythmOrigin==='sinusale'&&state.heartRateContext==='stressed'){
+  if(state.heartRateAssessment==='low'&&state.heartRateDecision==='confirm'&&state.rhythmOrigin==='sinusale'&&(state.heartRateContexts||[]).includes('stressed')){
     add(
       'warning',
       'Frequenza ridotta durante stress',
@@ -1317,7 +1362,7 @@ function buildConsistencyChecks(state,species=''){
     );
   }
 
-  if((state.heartRateAssessment==='low'||state.heartRateAssessment==='high')&&!state.heartRateContext){
+  if((state.heartRateAssessment==='low'||state.heartRateAssessment==='high')&&!(state.heartRateContexts||[]).length){
     add(
       'info',
       'Contesto della frequenza non indicato',
@@ -2256,14 +2301,15 @@ function ecgView(examId){
 
           <p><b>Contesto di registrazione</b></p>
           <div class="exam-grid">
-            ${optionButton(examId,'heartRateContext','resting','A riposo',state.heartRateContext)}
-            ${optionButton(examId,'heartRateContext','awake','Da sveglio',state.heartRateContext)}
-            ${optionButton(examId,'heartRateContext','stressed','Stress / agitazione',state.heartRateContext)}
-            ${optionButton(examId,'heartRateContext','sedated','Sedazione',state.heartRateContext)}
-            ${optionButton(examId,'heartRateContext','anesthetized','Anestesia',state.heartRateContext)}
-            ${optionButton(examId,'heartRateContext','exercise','Dopo esercizio',state.heartRateContext)}
-            ${optionButton(examId,'heartRateContext','unknown','Non definito',state.heartRateContext)}
+            ${toggleButton(examId,'heartRateContexts','awake','Da sveglio',state.heartRateContexts)}
+            ${toggleButton(examId,'heartRateContexts','resting','A riposo',state.heartRateContexts)}
+            ${toggleButton(examId,'heartRateContexts','stressed','Stress / agitazione',state.heartRateContexts)}
+            ${toggleButton(examId,'heartRateContexts','sedated','Sedazione',state.heartRateContexts)}
+            ${toggleButton(examId,'heartRateContexts','anesthetized','Anestesia',state.heartRateContexts)}
+            ${toggleButton(examId,'heartRateContexts','exercise','Dopo esercizio',state.heartRateContexts)}
+            ${toggleButton(examId,'heartRateContexts','unknown','Non definito',state.heartRateContexts)}
           </div>
+          <p class="meta">Puoi associare, per esempio, “Da sveglio” e “A riposo”. Sedazione e anestesia restano alternative allo stato di veglia.</p>
 
           ${heartRateProposal(state)?`
             <div class="notice" style="margin-top:14px">
@@ -2458,6 +2504,24 @@ function ecgView(examId){
               ${optionButton(examId,'bav2Subtype','high_grade','Alto grado',state.bav2Subtype)}
               ${optionButton(examId,'bav2Subtype','unclassified','Non classificabile',state.bav2Subtype)}
             </div>
+
+            <label style="margin-top:16px">Descrizione libera della conduzione
+              <textarea data-ecg-text="${examId}" data-field="conductionNotes"
+                placeholder="Es. Periodica mancata conduzione di onde P, con intervallo PR stabile nei battiti condotti...">${esc(state.conductionNotes)}</textarea>
+            </label>
+
+            <div class="notice" style="margin-top:14px">
+              <b>Conferma diagnostica</b><br>
+              ${state.bav2Subtype
+                ?`BAV di II grado — ${esc(bav2SubtypeLabel(state.bav2Subtype))}.`
+                :'Seleziona il sottotipo, quindi conferma il reperto.'
+              }
+              <div class="exam-grid" style="margin-top:10px">
+                ${optionButton(examId,'bav2Decision','confirm','Confermo',state.bav2Decision)}
+                ${optionButton(examId,'bav2Decision','reject','Non confermo',state.bav2Decision)}
+                ${optionButton(examId,'bav2Decision','inconclusive','Non conclusivo',state.bav2Decision)}
+              </div>
+            </div>
           `:''}
         </div>
       `:''}
@@ -2594,21 +2658,24 @@ function ecgView(examId){
                 placeholder="es. 220">
             </label>
 
-            <label>QT corretto / QTc (ms) — facoltativo
+            <label>QT corretto / QTc (ms)
               <input inputmode="decimal"
                 value="${esc(state.qtcValue)}"
                 data-ecg-input="${examId}"
                 data-field="qtcValue"
-                placeholder="es. 240">
+                placeholder="calcolato automaticamente">
             </label>
           </div>
 
-          ${state.qtcValue?`
-            <p><b>Formula QTc</b></p>
-            <div class="exam-grid">
-              ${optionButton(examId,'qtcFormula','bazett','Bazett',state.qtcFormula)}
-              ${optionButton(examId,'qtcFormula','fridericia','Fridericia',state.qtcFormula)}
-              ${optionButton(examId,'qtcFormula','other','Altra',state.qtcFormula)}
+          <p><b>Formula QTc</b></p>
+          <div class="exam-grid">
+            ${optionButton(examId,'qtcFormula','bazett','Bazett',state.qtcFormula)}
+            ${optionButton(examId,'qtcFormula','fridericia','Fridericia',state.qtcFormula)}
+            ${optionButton(examId,'qtcFormula','other','Altra / manuale',state.qtcFormula)}
+          </div>
+          ${state.qtValue&&state.heartRate&&state.qtcFormula!=='other'?`
+            <div class="notice success">
+              QTc calcolato automaticamente da QT e frequenza cardiaca: <b>${esc(state.qtcValue||'—')} ms</b>.
             </div>
           `:''}
 
@@ -3245,11 +3312,14 @@ function bind(){
         state.pWaveFindings=[];
       }
 
-      if(
-        b.dataset.field==='heartRateAssessment'||
-        b.dataset.field==='heartRateContext'
-      ){
+      if(b.dataset.field==='heartRateAssessment'){
         state.heartRateDecision='';
+      }
+      if(b.dataset.field==='qtcFormula'){
+        refreshAutomaticQtc(state);
+      }
+      if(b.dataset.field==='bav2Subtype'){
+        state.bav2Decision='';
       }
 
       if(b.dataset.field==='axisEvaluability'&&b.dataset.value==='not_evaluable'){
@@ -3283,6 +3353,21 @@ function bind(){
         }
       }
 
+      if(field==='heartRateContexts'){
+        if(value==='unknown'&&list.includes('unknown')){
+          list=['unknown'];
+        }else{
+          list=list.filter(x=>x!=='unknown');
+          if(['awake','sedated','anesthetized'].includes(value)&&list.includes(value)){
+            list=list.filter(x=>!['awake','sedated','anesthetized'].includes(x)||x===value);
+          }
+          if(['resting','stressed','exercise'].includes(value)&&list.includes(value)){
+            list=list.filter(x=>!['resting','stressed','exercise'].includes(x)||x===value);
+          }
+        }
+        state.heartRateDecision='';
+      }
+
       state[field]=list;
 
       if(field==='recommendationSelections'){
@@ -3312,6 +3397,9 @@ function bind(){
       if(t.dataset.field==='conclusionsText'){
         state.conclusionsEdited=true;
       }
+      if(t.dataset.field==='conductionNotes'){
+        state.description=buildEcgDescription(state);
+      }
       state.saved=false;
     };
   });
@@ -3321,6 +3409,9 @@ function bind(){
       const state=getEcgState(t.dataset.ecgInput);
       state[t.dataset.field]=t.value;
       if(t.dataset.field==='axisValue') state.axisDecision='';
+      if(['qtValue','heartRate'].includes(t.dataset.field)&&state.qtcFormula!=='other'){
+        refreshAutomaticQtc(state);
+      }
       state.description=buildEcgDescription(state);
       state.interpretation=buildEcgInterpretation(state,speciesForExam(t.dataset.ecgInput));
       state.saved=false;
@@ -3516,7 +3607,7 @@ function bind(){
           qrsToP:state.qrsToP,
           heartRate:state.heartRate,
           heartRateAssessment:state.heartRateAssessment,
-          heartRateContext:state.heartRateContext,
+          heartRateContexts:state.heartRateContexts,
           heartRateDecision:state.heartRateDecision,
           rhythmOrigin:state.rhythmOrigin,
           rhythmRegularity:state.rhythmRegularity,
@@ -3533,6 +3624,7 @@ function bind(){
           wanderingDecision:state.wanderingDecision,
           bav1Decision:state.bav1Decision,
           conductionMode:state.conductionMode,
+          conductionNotes:state.conductionNotes,
           bav2Subtype:state.bav2Subtype,
           bav2Decision:state.bav2Decision,
           ectopyMode:state.ectopyMode,
