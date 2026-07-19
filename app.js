@@ -341,11 +341,17 @@ function buildEcgHistoryText(state){
   }
   if(state.symptomMode!=='present') return '';
 
+  const freeText=String(state.symptomNotes||'').trim();
+  if(freeText){
+    return freeText.replace(/[.]+$/, '')+'.';
+  }
+
   const symptoms=(Array.isArray(state.symptoms)?state.symptoms:[])
     .map(symptomLabel)
     .filter(Boolean);
 
   const parts=[];
+
   if(symptoms.length){
     const joined=symptoms.length===1
       ? symptoms[0]
@@ -357,11 +363,21 @@ function buildEcgHistoryText(state){
     parts.push('Sono riferiti episodi clinici non ancora caratterizzati.');
   }
 
-  if(state.symptomFrequency) parts.push(`Frequenza: ${state.symptomFrequency}.`);
-  if(state.symptomContext) parts.push(`Circostanze: ${state.symptomContext}.`);
-  if(state.symptomDuration) parts.push(`Durata indicativa: ${state.symptomDuration}.`);
-  if(state.symptomRecovery) parts.push(`Recupero: ${state.symptomRecovery}.`);
-  if(state.symptomNotes) parts.push(state.symptomNotes.trim().replace(/[.]+$/, '')+'.');
+  if(state.symptomFrequency){
+    parts.push(`La frequenza riferita è ${String(state.symptomFrequency).trim()}.`);
+  }
+
+  if(state.symptomContext){
+    parts.push(`Gli episodi sono osservati ${String(state.symptomContext).trim()}.`);
+  }
+
+  if(state.symptomDuration){
+    parts.push(`La durata indicativa è ${String(state.symptomDuration).trim()}.`);
+  }
+
+  if(state.symptomRecovery){
+    parts.push(`Il recupero viene descritto come ${String(state.symptomRecovery).trim()}.`);
+  }
 
   return parts.join(' ');
 }
@@ -1794,7 +1810,7 @@ function ecgView(examId){
       ${state.openStep===key&&key==='anamnesi-ecg'?`
         <div class="card" style="margin:12px 0">
           <h3>Anamnesi aritmica</h3>
-          <p class="meta">Questi dati orientano le raccomandazioni, ma non modificano automaticamente la diagnosi ECG.</p>
+          <p class="meta">I dati strutturati orientano le raccomandazioni. Se compili le note libere, queste diventano la sintesi anamnestica principale.</p>
 
           <div class="exam-grid">
             ${optionButton(examId,'symptomMode','none','Nessun episodio riferito',state.symptomMode)}
