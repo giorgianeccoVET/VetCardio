@@ -723,8 +723,8 @@ function axisProposal(state,species){
   if(angle>=min&&angle<=max){
     return {
       code:'normal',
-      label:'Asse elettrico nei limiti orientativi',
-      sentence:'Asse elettrico medio del QRS nei limiti orientativi per la posizione di registrazione.',
+      label:'Asse elettrico del QRS nei limiti della norma',
+      sentence:'Asse elettrico del QRS nei limiti della norma.',
       range:`Intervallo di riferimento orientativo per ${position}: ${min>0?'+':''}${min}° a +${max}°.${suffix}`
     };
   }
@@ -732,7 +732,7 @@ function axisProposal(state,species){
   if(angle<min){
     return {
       code:'left',
-      label:'Possibile deviazione assiale sinistra',
+      label:'Deviazione assiale sinistra',
       sentence:'Deviazione assiale sinistra.',
       range:`Valore esterno all’intervallo orientativo per ${position}: ${min>0?'+':''}${min}° a +${max}°.${suffix}`
     };
@@ -740,7 +740,7 @@ function axisProposal(state,species){
 
   return {
     code:'right',
-    label:'Possibile deviazione assiale destra',
+    label:'Deviazione assiale destra',
     sentence:'Deviazione assiale destra.',
     range:`Valore esterno all’intervallo orientativo per ${position}: ${min>0?'+':''}${min}° a +${max}°.${suffix}`
   };
@@ -921,7 +921,7 @@ function buildClinicalFindings(state,species=''){
        patterns:Array.isArray(state.ectopyPatterns)?state.ectopyPatterns:[],
        count:state.ectopyCount||''}
     );
-  }else if(state.ectopyMode==='absent'){
+  }else if(state.ectopyMode==='none'){
     add('no_ectopy','ectopy','Assenza di battiti ectopici',
       'Assenza di battiti ectopici nel tracciato registrato.',false);
   }
@@ -930,7 +930,7 @@ function buildClinicalFindings(state,species=''){
   if(axis&&state.axisDecision==='confirm'){
     if(axis.code==='normal'){
       add('normal_axis','axis','Asse elettrico nei limiti',
-        'Asse elettrico medio del QRS nei limiti orientativi per la posizione di registrazione.',false);
+        'Asse elettrico del QRS nei limiti della norma.',false);
     }else{
       add(axis.code==='left'?'left_axis_deviation':'right_axis_deviation',
         'axis',axis.label,axis.sentence,true);
@@ -960,32 +960,42 @@ function buildAutomaticDiagnosis(state,species=''){
   const findings=buildClinicalFindings(state,species);
   const abnormal=findings.filter(f=>f.abnormal);
   const normal=findings.filter(f=>!f.abnormal);
-
-  const hasEnoughNormalData =
-    findings.some(f=>f.category==='rhythm') &&
-    findings.some(f=>f.category==='conduction') &&
-    findings.some(f=>f.category==='ectopy') &&
-    findings.some(f=>f.category==='axis') &&
-    findings.some(f=>f.category==='qt');
-
-  if(!abnormal.length&&hasEnoughNormalData){
-    return {summary:'ECG nei limiti della norma.',findings,abnormal,normal};
-  }
-  if(!abnormal.length){
-    return {summary:'',findings,abnormal,normal};
-  }
-
-  const phrases=abnormal.map(f=>f.diagnosticText.replace(/\.$/,''));
-  const summary=phrases.length===1
-    ? phrases[0]+'.'
-    : phrases.slice(0,-1).join(', ')+' e '+phrases[phrases.length-1]+'.';
-
+  const codes=new Set(findings.map(f=>f.code));
+  const complete=['rhythm','conduction','ectopy','axis','qt'].every(category=>findings.some(f=>f.category===category));
+  if(!abnormal.length&&complete) return {summary:'Esame elettrocardiografico nei limiti della norma.',findings,abnormal,normal};
+  if(!abnormal.length) return {summary:'',findings,abnormal,normal};
+  const join=items=>items.length<2?(items[0]||''):items.length===2?`${items[0]} e ${items[1]}`:`${items.slice(0,-1).join(', ')} e ${items.at(-1)}`;
+  let rhythm='';
+  if(codes.has('atrial_fibrillation')) rhythm='Fibrillazione atriale';
+  else if(codes.has('atrial_flutter')) rhythm='Flutter atriale';
+  else if(codes.has('ventricular_rhythm')) rhythm='Ritmo ventricolare';
+  else if(codes.has('junctional_rhythm')) rhythm='Ritmo giunzionale';
+  else if(codes.has('atrial_rhythm')) rhythm='Ritmo atriale';
+  else if(codes.has('wandering_pacemaker')) rhythm='Ritmo sinusale con pacemaker migrante';
+  else if(codes.has('sinus_rhythm')) rhythm='Ritmo sinusale';
+  let conduction='';
+  const b2=findings.find(f=>f.code==='av_block_2');
+  if(codes.has('complete_av_block')) conduction='blocco atrioventricolare completo';
+  else if(codes.has('advanced_av_block')) conduction='blocco atrioventricolare avanzato';
+  else if(b2){ const sub=b2.subtype?bav2SubtypeLabel(b2.subtype):''; conduction=sub?`blocco atrioventricolare di II grado (${sub})`:'blocco atrioventricolare di II grado'; }
+  else if(codes.has('av_block_1')) conduction='blocco atrioventricolare di I grado';
+  const assoc=[];
+  const ect=findings.find(f=>['ventricular_ectopy','supraventricular_ectopy','ectopy_uncertain'].includes(f.code));
+  if(ect) assoc.push(ect.diagnosticText.replace(/\.$/,'').replace(/^Extrasistolia/,'extrasistolia'));
+  if(codes.has('left_axis_deviation')) assoc.push('deviazione assiale sinistra');
+  if(codes.has('right_axis_deviation')) assoc.push('deviazione assiale destra');
+  if(codes.has('prolonged_qt')) assoc.push('allungamento dell’intervallo QT');
+  if(codes.has('short_qt')) assoc.push('accorciamento dell’intervallo QT');
+  if(state.stSegment==='elevated'||state.stSegment==='depressed'||state.tWaveMorphology==='altered') assoc.push('alterazioni della ripolarizzazione ventricolare');
+  let summary=rhythm&&conduction?`${rhythm} complicato da ${conduction}`:conduction?conduction[0].toUpperCase()+conduction.slice(1):rhythm;
+  if(assoc.length) summary=summary?`${summary}, associato a ${join(assoc)}`:join(assoc);
+  if(!summary) summary=join(abnormal.map(f=>f.diagnosticText.replace(/\.$/,'')));
+  if(summary&&!summary.endsWith('.')) summary+='.';
   return {summary,findings,abnormal,normal};
 }
 
 function automaticDiagnosisText(state,species=''){
-  const auto=buildAutomaticDiagnosis(state,species);
-  return auto.summary||auto.items.join(' ');
+  return buildAutomaticDiagnosis(state,species).summary||'';
 }
 
 function clinicalFindingCodes(state,species=''){
@@ -1287,82 +1297,22 @@ function buildAutomaticConclusions(state,species=''){
   const findings=buildClinicalFindings(state,species);
   const codes=new Set(findings.map(f=>f.code));
   const abnormal=findings.filter(f=>f.abnormal);
-  const autoDiagnosis=buildAutomaticDiagnosis(state,species);
-
-  if(autoDiagnosis.summary==='ECG nei limiti della norma.'){
-    return 'ECG nei limiti della norma. In assenza di segni clinici non si evidenziano alterazioni elettrocardiografiche di rilievo.';
-  }
-
+  if(buildAutomaticDiagnosis(state,species).summary==='Esame elettrocardiografico nei limiti della norma.') return 'Non si evidenziano alterazioni elettrocardiografiche di rilievo clinico.';
   const parts=[];
-
-  if(codes.has('wandering_pacemaker')){
-    parts.push('Il reperto è compatibile con pacemaker migrante, condizione generalmente considerata una variante fisiologica nel cane in assenza di altre alterazioni cliniche o elettrocardiografiche. L’interpretazione deve essere sempre integrata con il quadro clinico del paziente e con gli eventuali accertamenti diagnostici.');
-  }
-
-  if(codes.has('av_block_1')){
-    parts.push('Il reperto è compatibile con un ritardo della conduzione atrioventricolare, da interpretare nel contesto clinico del paziente.');
-  }
-
-  if(codes.has('av_block_2')){
-    parts.push('Il reperto è compatibile con un blocco atrioventricolare di II grado e richiede una valutazione clinica integrata per definirne il significato.');
-  }
-
-  if(codes.has('advanced_av_block')){
-    parts.push('È presente un disturbo avanzato della conduzione atrioventricolare, potenzialmente clinicamente rilevante.');
-  }
-
-  if(codes.has('complete_av_block')){
-    parts.push('È presente un blocco atrioventricolare completo con dissociazione atrioventricolare, reperto clinicamente rilevante.');
-  }
-
-  if(codes.has('ventricular_ectopy')){
-    parts.push('La presenza di extrasistolia ventricolare richiede inquadramento nel contesto clinico e cardiologico complessivo.');
-  }
-
-  if(codes.has('supraventricular_ectopy')){
-    parts.push('La presenza di extrasistolia sopraventricolare richiede inquadramento nel contesto clinico e cardiologico complessivo.');
-  }
-
-  if(codes.has('atrial_fibrillation')){
-    parts.push('La fibrillazione atriale richiede valutazione cardiologica completa e caratterizzazione della risposta ventricolare.');
-  }
-
-  if(codes.has('atrial_flutter')){
-    parts.push('Il flutter atriale richiede valutazione cardiologica completa e caratterizzazione della conduzione atrioventricolare.');
-  }
-
-  if(codes.has('prolonged_qt')){
-    parts.push('L’allungamento dell’intervallo QT deve essere interpretato in relazione alla frequenza cardiaca, agli elettroliti e ai farmaci assunti.');
-  }
-
-  if(codes.has('short_qt')){
-    parts.push('L’accorciamento dell’intervallo QT deve essere interpretato nel contesto clinico e metabolico.');
-  }
-
-  if(codes.has('left_axis_deviation')||codes.has('right_axis_deviation')){
-    parts.push('La deviazione dell’asse elettrico deve essere correlata alla posizione di registrazione, alla conformazione toracica e agli eventuali reperti cardiaci strutturali.');
-  }
-
-  if(
-    state.stSegment==='elevated' ||
-    state.stSegment==='depressed' ||
-    state.tWaveMorphology==='altered'
-  ){
-    parts.push('Le alterazioni della ripolarizzazione ventricolare devono essere interpretate nel contesto clinico e metabolico.');
-  }
-
-  if(!parts.length&&abnormal.length){
-    parts.push('I reperti elettrocardiografici rilevati devono essere interpretati nel contesto clinico complessivo del paziente.');
-  }
-
-  const selected=Array.isArray(state.recommendationSelections)
-    ? state.recommendationSelections
-    : [];
-
-  if(selected.includes('none') && !parts.length){
-    parts.push('Sulla base del solo esame elettrocardiografico non si evidenziano elementi che rendano necessari ulteriori approfondimenti.');
-  }
-
+  if(codes.has('wandering_pacemaker')) parts.push('Il pacemaker migrante rappresenta generalmente una variante fisiologica nel cane, in assenza di ulteriori alterazioni cliniche o elettrocardiografiche.');
+  if(codes.has('av_block_1')) parts.push('Il reperto documenta un ritardo della conduzione atrioventricolare, da correlare alla frequenza cardiaca e al quadro clinico.');
+  if(codes.has('av_block_2')) parts.push('Il blocco atrioventricolare di II grado richiede caratterizzazione clinica e valutazione della risposta cronotropa.');
+  if(codes.has('advanced_av_block')) parts.push('È presente un disturbo avanzato della conduzione atrioventricolare, potenzialmente clinicamente rilevante.');
+  if(codes.has('complete_av_block')) parts.push('È presente un blocco atrioventricolare completo, reperto clinicamente rilevante.');
+  if(codes.has('ventricular_ectopy')) parts.push('La presenza di extrasistoli ventricolari richiede un inquadramento cardiologico completo e, in funzione della complessità, la quantificazione mediante monitoraggio Holter.');
+  if(codes.has('supraventricular_ectopy')) parts.push('La presenza di extrasistoli sopraventricolari deve essere correlata al quadro cardiologico complessivo e alla loro frequenza.');
+  if(codes.has('atrial_fibrillation')) parts.push('La fibrillazione atriale richiede valutazione cardiologica completa e caratterizzazione della risposta ventricolare.');
+  if(codes.has('atrial_flutter')) parts.push('Il flutter atriale richiede valutazione cardiologica completa e caratterizzazione della conduzione atrioventricolare.');
+  if(codes.has('prolonged_qt')) parts.push('L’allungamento dell’intervallo QT deve essere correlato alla frequenza cardiaca, all’assetto elettrolitico e ai farmaci assunti.');
+  if(codes.has('short_qt')) parts.push('L’accorciamento dell’intervallo QT deve essere interpretato nel contesto clinico e metabolico.');
+  if(codes.has('left_axis_deviation')||codes.has('right_axis_deviation')) parts.push('La deviazione assiale deve essere correlata alla morfologia dei complessi QRS e agli eventuali reperti cardiaci strutturali.');
+  if(state.stSegment==='elevated'||state.stSegment==='depressed'||state.tWaveMorphology==='altered') parts.push('Le alterazioni della ripolarizzazione ventricolare sono aspecifiche e devono essere correlate al quadro clinico, metabolico e cardiologico.');
+  if(!parts.length&&abnormal.length) parts.push('I reperti elettrocardiografici rilevati devono essere interpretati nel contesto clinico complessivo del paziente.');
   return [...new Set(parts)].join(' ');
 }
 
@@ -1416,44 +1366,17 @@ function diagnosisDot(state,species=''){
 }
 
 function buildEcgInterpretation(state,species=''){
+  const auto=buildAutomaticDiagnosis(state,species);
+  if(auto.summary==='Esame elettrocardiografico nei limiti della norma.') return auto.summary;
   const parts=[];
-
-  if(wanderingSuggested(state)){
-    if(state.wanderingDecision==='confirm'){
-      parts.push('Ritmo sinusale con pacemaker migrante (wandering pacemaker).');
-    }else if(state.wanderingDecision==='inconclusive'){
-      parts.push('Reperti suggestivi ma non conclusivi per pacemaker migrante (wandering pacemaker).');
-    }
+  if(wanderingSuggested(state)&&state.wanderingDecision==='confirm') parts.push('Il tracciato è compatibile con ritmo sinusale caratterizzato da pacemaker migrante.');
+  if(bav1Suggested(state)&&state.bav1Decision==='confirm') parts.push('L’allungamento costante dell’intervallo PR con conduzione 1:1 è compatibile con blocco atrioventricolare di I grado.');
+  if(bav2Suggested(state)&&state.bav2Decision==='confirm'){
+    const sub=bav2SubtypeLabel(state.bav2Subtype);
+    parts.push(sub?`La presenza di onde P non condotte è compatibile con blocco atrioventricolare di II grado (${sub}).`:'La presenza di onde P non condotte è compatibile con blocco atrioventricolare di II grado.');
   }
-
-  if(bav1Suggested(state)){
-    if(state.bav1Decision==='confirm'){
-      parts.push('Blocco atrioventricolare di I grado.');
-    }else if(state.bav1Decision==='inconclusive'){
-      parts.push('Intervallo PR prolungato, reperto non conclusivo per blocco atrioventricolare di I grado.');
-    }
-  }
-
-  if(bav2Suggested(state)){
-    const subtype=bav2SubtypeLabel(state.bav2Subtype);
-    if(state.bav2Decision==='confirm'){
-      parts.push(subtype
-        ? `Blocco atrioventricolare di II grado, ${subtype}.`
-        : 'Blocco atrioventricolare di II grado.');
-    }else if(state.bav2Decision==='inconclusive'){
-      parts.push(subtype
-        ? `Disturbo della conduzione atrioventricolare suggestivo ma non conclusivo per BAV di II grado, ${subtype}.`
-        : 'Disturbo della conduzione atrioventricolare suggestivo ma non conclusivo per BAV di II grado.');
-    }
-  }
-
   const axis=axisProposal(state,species);
-  if(axis&&state.axisDecision==='confirm'){
-    parts.push(axis.sentence);
-  }else if(axis&&state.axisDecision==='inconclusive'){
-    parts.push(`Valore dell’asse elettrico suggestivo ma non conclusivo: ${axis.sentence.charAt(0).toLowerCase()+axis.sentence.slice(1)}`);
-  }
-
+  if(axis&&state.axisDecision==='confirm') parts.push(axis.sentence);
   return [...new Set(parts)].join(' ');
 }
 
