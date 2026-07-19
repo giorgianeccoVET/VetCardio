@@ -399,7 +399,12 @@ function heartRateContextLabels(values){
 }
 
 function heartRateContextPhrase(values){
-  const labels=heartRateContextLabels(values);
+  const list=Array.isArray(values)?values:[];
+  if(list.includes('awake')&&list.includes('resting')){
+    return 'sveglio e a riposo';
+  }
+
+  const labels=heartRateContextLabels(list);
   if(!labels.length) return '';
   if(labels.length===1) return labels[0];
   if(labels.length===2) return `${labels[0]} e ${labels[1]}`;
@@ -2129,6 +2134,15 @@ function toggleButton(examId,field,value,label,current){
     data-value="${value}">${esc(label)}</button>`;
 }
 
+function heartRateContextButton(examId,value,label,current){
+  const selected=Array.isArray(current)&&current.includes(value);
+  return `<button type="button"
+    class="exam ${selected?'active':''}"
+    aria-pressed="${selected?'true':'false'}"
+    data-heart-rate-context-toggle="${examId}"
+    data-value="${value}">${esc(label)}</button>`;
+}
+
 function ecgView(examId){
   const p=patients.find(p=>(p.visits||[]).some(v=>(v.exams||[]).some(e=>e.id===examId)));
   const v=p?.visits?.find(v=>(v.exams||[]).some(e=>e.id===examId));
@@ -2301,13 +2315,13 @@ function ecgView(examId){
 
           <p><b>Contesto di registrazione</b></p>
           <div class="exam-grid">
-            ${toggleButton(examId,'heartRateContexts','awake','Da sveglio',state.heartRateContexts)}
-            ${toggleButton(examId,'heartRateContexts','resting','A riposo',state.heartRateContexts)}
-            ${toggleButton(examId,'heartRateContexts','stressed','Stress / agitazione',state.heartRateContexts)}
-            ${toggleButton(examId,'heartRateContexts','sedated','Sedazione',state.heartRateContexts)}
-            ${toggleButton(examId,'heartRateContexts','anesthetized','Anestesia',state.heartRateContexts)}
-            ${toggleButton(examId,'heartRateContexts','exercise','Dopo esercizio',state.heartRateContexts)}
-            ${toggleButton(examId,'heartRateContexts','unknown','Non definito',state.heartRateContexts)}
+            ${heartRateContextButton(examId,'awake','Da sveglio',state.heartRateContexts)}
+            ${heartRateContextButton(examId,'resting','A riposo',state.heartRateContexts)}
+            ${heartRateContextButton(examId,'stressed','Stress / agitazione',state.heartRateContexts)}
+            ${heartRateContextButton(examId,'sedated','Sedazione',state.heartRateContexts)}
+            ${heartRateContextButton(examId,'anesthetized','Anestesia',state.heartRateContexts)}
+            ${heartRateContextButton(examId,'exercise','Dopo esercizio',state.heartRateContexts)}
+            ${heartRateContextButton(examId,'unknown','Non definito',state.heartRateContexts)}
           </div>
           <p class="meta">Puoi associare, per esempio, “Da sveglio” e “A riposo”. Sedazione e anestesia restano alternative allo stato di veglia.</p>
 
@@ -3335,6 +3349,46 @@ function bind(){
     };
   });
 
+  document.querySelectorAll('[data-heart-rate-context-toggle]').forEach(b=>{
+    b.onclick=()=>{
+      const examId=b.dataset.heartRateContextToggle;
+      const state=getEcgState(examId);
+      const value=b.dataset.value;
+      let list=Array.isArray(state.heartRateContexts)
+        ? [...state.heartRateContexts]
+        : [];
+
+      if(list.includes(value)){
+        list=list.filter(item=>item!==value);
+      }else{
+        if(value==='unknown'){
+          list=['unknown'];
+        }else{
+          list=list.filter(item=>item!=='unknown');
+
+          // Stato di coscienza: una sola scelta.
+          if(['awake','sedated','anesthetized'].includes(value)){
+            list=list.filter(item=>!['awake','sedated','anesthetized'].includes(item));
+          }
+
+          // Condizione del paziente: una sola scelta.
+          if(['resting','stressed','exercise'].includes(value)){
+            list=list.filter(item=>!['resting','stressed','exercise'].includes(item));
+          }
+
+          list.push(value);
+        }
+      }
+
+      state.heartRateContexts=list;
+      state.heartRateDecision='';
+      state.description=buildEcgDescription(state);
+      state.interpretation=buildEcgInterpretation(state,speciesForExam(examId));
+      state.saved=false;
+      render();
+    };
+  });
+
   document.querySelectorAll('[data-ecg-toggle]').forEach(b=>{
     b.onclick=()=>{
       const examId=b.dataset.ecgToggle;
@@ -3352,22 +3406,6 @@ function bind(){
           list=list.filter(x=>x!=='none');
         }
       }
-
-      if(field==='heartRateContexts'){
-        if(value==='unknown'&&list.includes('unknown')){
-          list=['unknown'];
-        }else{
-          list=list.filter(x=>x!=='unknown');
-          if(['awake','sedated','anesthetized'].includes(value)&&list.includes(value)){
-            list=list.filter(x=>!['awake','sedated','anesthetized'].includes(x)||x===value);
-          }
-          if(['resting','stressed','exercise'].includes(value)&&list.includes(value)){
-            list=list.filter(x=>!['resting','stressed','exercise'].includes(x)||x===value);
-          }
-        }
-        state.heartRateDecision='';
-      }
-
       state[field]=list;
 
       if(field==='recommendationSelections'){
