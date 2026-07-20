@@ -375,6 +375,11 @@ function getEcgState(examId,exam=null){
       ectopyPatterns:Array.isArray(saved.ectopyPatterns)?saved.ectopyPatterns:[],
       ectopyMorphology:saved.ectopyMorphology||'',
       ectopyCount:saved.ectopyCount||'',
+      ectopyFrequency:saved.ectopyFrequency||'',
+      ectopyPause:saved.ectopyPause||'',
+      ectopyRonT:saved.ectopyRonT||'',
+      ectopyNotes:saved.ectopyNotes||'',
+      ectopyDecision:saved.ectopyDecision||'',
       stSegment:saved.stSegment||'',
       stDeviation:saved.stDeviation||'',
       tWaveMorphology:saved.tWaveMorphology||(saved.tWaveMode==='normal'?'regular':saved.tWaveMode==='detail'?'altered':''),
@@ -687,15 +692,26 @@ function buildEcgDescription(state){
     parts.push('Non si rilevano battiti ectopici nel tracciato registrato.');
   }else if(state.ectopyMode==='present'){
     const origin=ectopyOriginLabel(state.ectopyOrigin);
-    const patterns=state.ectopyPatterns.map(ectopyPatternLabel);
+    const patterns=(state.ectopyPatterns||[]).map(ectopyPatternLabel);
     const morphology=ectopyMorphologyLabel(state.ectopyMorphology);
+    const frequency=ectopyFrequencyLabel(state.ectopyFrequency);
+    const pause=ectopyPauseLabel(state.ectopyPause);
+    const ronT=ectopyRonTLabel(state.ectopyRonT);
 
     let sentence='Si rilevano extrasistoli';
     if(origin) sentence+=` ${origin}`;
+    if(morphology) sentence+=` ${morphology}`;
     if(patterns.length) sentence+=` ${patterns.join(', ')}`;
-    if(morphology) sentence+=`, ${morphology}`;
+    if(frequency&&state.ectopyFrequency!=='not_assessed') sentence+=`, ${frequency}`;
     if(state.ectopyCount) sentence+=` (n. ${state.ectopyCount})`;
+    if(pause&&state.ectopyPause!=='not_assessed') sentence+=`, ${pause}`;
+    if(ronT&&state.ectopyRonT!=='not_assessed') sentence+=`, con ${ronT}`;
     parts.push(sentence+'.');
+
+    if(state.ectopyNotes){
+      const note=String(state.ectopyNotes).trim();
+      if(note) parts.push(note.endsWith('.')?note:`${note}.`);
+    }
   }
 
   if(state.stSegment){
@@ -935,6 +951,33 @@ function ectopyMorphologyLabel(value){
   return ({
     monomorphic:'monomorfe',
     polymorphic:'polimorfe'
+  })[value]||'';
+}
+
+
+function ectopyFrequencyLabel(value){
+  return ({
+    occasional:'occasionali',
+    frequent:'frequenti',
+    very_frequent:'molto frequenti',
+    not_assessed:'frequenza non quantificata'
+  })[value]||'';
+}
+
+function ectopyPauseLabel(value){
+  return ({
+    complete:'seguite da pausa compensatoria completa',
+    incomplete:'seguite da pausa compensatoria incompleta',
+    absent:'non seguite da pausa compensatoria',
+    not_assessed:'pausa compensatoria non valutata'
+  })[value]||'';
+}
+
+function ectopyRonTLabel(value){
+  return ({
+    absent:'assenza di fenomeno R-on-T',
+    present:'presenza di fenomeno R-on-T',
+    not_assessed:'fenomeno R-on-T non valutato'
   })[value]||'';
 }
 
@@ -1186,15 +1229,21 @@ function decisionLabel(value){
 }
 
 function ectopyDiagnosis(state){
-  if(state.ectopyMode!=='present') return '';
+  if(state.ectopyMode!=='present'||state.ectopyDecision==='reject') return '';
+
   const origin=({
-    supraventricular:'Extrasistolia sopraventricolare',
-    ventricular:'Extrasistolia ventricolare',
-    uncertain:'Extrasistolia di origine non determinabile'
-  })[state.ectopyOrigin]||'Extrasistolia';
+    supraventricular:'extrasistoli sopraventricolari',
+    ventricular:'extrasistoli ventricolari',
+    uncertain:'extrasistoli di origine non determinabile'
+  })[state.ectopyOrigin]||'extrasistoli';
+
+  const morphology=({
+    monomorphic:'monomorfe',
+    polymorphic:'polimorfe'
+  })[state.ectopyMorphology]||'';
 
   const patterns=(state.ectopyPatterns||[]).map(value=>({
-    isolated:'isolata',
+    isolated:'isolate',
     couplets:'in coppie',
     triplets:'in triplette',
     runs:'in salve',
@@ -1202,14 +1251,9 @@ function ectopyDiagnosis(state){
     trigeminy:'con trigeminismo'
   })[value]).filter(Boolean);
 
-  const morphology=({
-    monomorphic:'monomorfa',
-    polymorphic:'polimorfa'
-  })[state.ectopyMorphology]||'';
-
   let result=origin;
   if(morphology) result+=` ${morphology}`;
-  if(patterns.length) result+=`, ${patterns.join(', ')}`;
+  if(patterns.length) result+=` ${patterns.join(', ')}`;
   if(state.ectopyCount) result+=` (${state.ectopyCount} complessi osservati)`;
   return result+'.';
 }
@@ -1333,7 +1377,7 @@ function buildAutomaticDiagnosis(state,species=''){
   if(codes.has('short_qt')) assoc.push('accorciamento dell’intervallo QT');
   if(state.stSegment==='elevated'||state.stSegment==='depressed'||state.tWaveMorphology==='altered') assoc.push('alterazioni della ripolarizzazione ventricolare');
   let summary=rhythm&&conduction?`${rhythm} complicato da ${conduction}`:conduction?conduction[0].toUpperCase()+conduction.slice(1):rhythm;
-  if(assoc.length) summary=summary?`${summary}, associato a ${join(assoc)}`:join(assoc);
+  if(assoc.length) summary=summary?`${summary} associato a ${join(assoc)}`:join(assoc);
   if(!summary) summary=join(abnormal.map(f=>f.diagnosticText.replace(/\.$/,'')));
   if(summary&&!summary.endsWith('.')) summary+='.';
   return {summary,findings,abnormal,normal};
@@ -1471,12 +1515,29 @@ function buildConsistencyChecks(state,species=''){
     );
   }
 
-  if(ventricularEctopy&&state.qrsMode==='normal'){
+  if(
+    state.ectopyMode==='present'&&
+    state.ectopyOrigin!=='ventricular'&&
+    state.ectopyRonT==='present'
+  ){
+    add(
+      'warning',
+      'R-on-T selezionato per extrasistoli non ventricolari',
+      'Il fenomeno R-on-T è una caratteristica da riferire ai complessi ventricolari prematuri.',
+      ['Extrasistoli']
+    );
+  }
+
+  if(
+    state.ectopyMode==='present'&&
+    state.ectopyPatterns?.includes('runs')&&
+    !['ventricular','supraventricular'].includes(state.ectopyOrigin)
+  ){
     add(
       'info',
-      'Extrasistolia ventricolare con QRS descritto come normale',
-      'Verificare che la classificazione dell’extrasistole e la morfologia del QRS siano coerenti.',
-      ['QRS','Extrasistoli']
+      'Salve con origine non determinata',
+      'Quando possibile, specificare se la sequenza è ventricolare o sopraventricolare.',
+      ['Extrasistoli']
     );
   }
 
@@ -1627,20 +1688,25 @@ function buildAutomaticRecommendations(state,species=''){
   }
 
   if(codes.has('ventricular_ectopy')){
+    suggested.add('ecg_control');
     suggested.add('echocardiography');
+    suggested.add('holter');
+    suggested.add('biochemistry');
+    suggested.add('electrolytes');
+    suggested.add('troponin');
 
     const patterns=Array.isArray(state.ectopyPatterns)?state.ectopyPatterns:[];
-    const frequentPattern=
+    const complexPattern=
       patterns.includes('couplets') ||
       patterns.includes('triplets') ||
       patterns.includes('runs') ||
       patterns.includes('bigeminy') ||
       patterns.includes('trigeminy') ||
-      state.ectopyMorphology==='polymorphic';
+      state.ectopyMorphology==='polymorphic' ||
+      state.ectopyRonT==='present';
 
-    if(frequentPattern){
-      suggested.add('holter');
-      suggested.add('electrolytes');
+    if(complexPattern){
+      suggested.add('continuous_ecg');
     }
   }
 
@@ -2244,6 +2310,29 @@ function buildEcgInterpretation(state,species=''){
     parts.push(`La presenza di onde P non condotte è compatibile con ${bav2DiagnosisPhrase(state.bav2Subtype)}.`);
   }
 
+  if(state.ectopyMode==='present'&&state.ectopyDecision!=='reject'){
+    const origin=ectopyOriginLabel(state.ectopyOrigin);
+    const morphology=ectopyMorphologyLabel(state.ectopyMorphology);
+    const patterns=(state.ectopyPatterns||[]).map(ectopyPatternLabel);
+    const frequency=ectopyFrequencyLabel(state.ectopyFrequency);
+
+    let ectopySentence='Il tracciato evidenzia extrasistoli';
+    if(origin) ectopySentence+=` ${origin}`;
+    if(morphology) ectopySentence+=` ${morphology}`;
+    if(patterns.length) ectopySentence+=` ${patterns.join(', ')}`;
+    if(frequency&&state.ectopyFrequency!=='not_assessed') ectopySentence+=`, ${frequency}`;
+    ectopySentence+=' nel tratto registrato.';
+    parts.push(ectopySentence);
+
+    const absentComplex=[];
+    if(!(state.ectopyPatterns||[]).includes('couplets')) absentComplex.push('coppie');
+    if(!(state.ectopyPatterns||[]).includes('triplets')) absentComplex.push('triplette');
+    if(!(state.ectopyPatterns||[]).includes('runs')) absentComplex.push('salve');
+    if(absentComplex.length===3){
+      parts.push('Non si osservano coppie, triplette o salve nel tracciato registrato.');
+    }
+  }
+
   const hrInterpretation=heartRateInterpretationText(state);
   if(hrInterpretation) parts.push(hrInterpretation);
 
@@ -2722,6 +2811,45 @@ function ecgView(examId){
                   data-field="ectopyCount"
                   placeholder="es. 3">
               </label>
+            </div>
+
+            <p><b>Frequenza nel tracciato</b></p>
+            <div class="exam-grid">
+              ${optionButton(examId,'ectopyFrequency','occasional','Occasionali',state.ectopyFrequency)}
+              ${optionButton(examId,'ectopyFrequency','frequent','Frequenti',state.ectopyFrequency)}
+              ${optionButton(examId,'ectopyFrequency','very_frequent','Molto frequenti',state.ectopyFrequency)}
+              ${optionButton(examId,'ectopyFrequency','not_assessed','Non quantificata',state.ectopyFrequency)}
+            </div>
+
+            ${state.ectopyOrigin==='ventricular'?`
+              <p><b>Pausa compensatoria</b></p>
+              <div class="exam-grid">
+                ${optionButton(examId,'ectopyPause','complete','Completa',state.ectopyPause)}
+                ${optionButton(examId,'ectopyPause','incomplete','Incompleta',state.ectopyPause)}
+                ${optionButton(examId,'ectopyPause','absent','Assente',state.ectopyPause)}
+                ${optionButton(examId,'ectopyPause','not_assessed','Non valutata',state.ectopyPause)}
+              </div>
+
+              <p><b>Fenomeno R-on-T</b></p>
+              <div class="exam-grid">
+                ${optionButton(examId,'ectopyRonT','absent','Assente',state.ectopyRonT)}
+                ${optionButton(examId,'ectopyRonT','present','Presente',state.ectopyRonT)}
+                ${optionButton(examId,'ectopyRonT','not_assessed','Non valutabile',state.ectopyRonT)}
+              </div>
+            `:''}
+
+            <label style="margin-top:16px">Descrizione libera delle extrasistoli
+              <textarea data-ecg-text="${examId}" data-field="ectopyNotes"
+                placeholder="Es. Complessi ventricolari prematuri non preceduti da onda P e seguiti da pausa compensatoria completa.">${esc(state.ectopyNotes)}</textarea>
+            </label>
+
+            <div class="notice" style="margin-top:14px">
+              <b>Conferma diagnostica</b>
+              <div class="exam-grid" style="margin-top:10px">
+                ${optionButton(examId,'ectopyDecision','confirm','Confermo',state.ectopyDecision)}
+                ${optionButton(examId,'ectopyDecision','reject','Non confermo',state.ectopyDecision)}
+                ${optionButton(examId,'ectopyDecision','inconclusive','Non conclusivo',state.ectopyDecision)}
+              </div>
             </div>
           `:''}
         </div>
@@ -3488,6 +3616,12 @@ function bind(){
       if(b.dataset.field==='bav2Subtype'){
         state.bav2Decision='';
       }
+      if([
+        'ectopyMode','ectopyOrigin','ectopyMorphology',
+        'ectopyFrequency','ectopyPause','ectopyRonT'
+      ].includes(b.dataset.field)){
+        state.ectopyDecision='';
+      }
 
       if(b.dataset.field==='axisEvaluability'&&b.dataset.value==='not_evaluable'){
         state.axisDecision='';
@@ -3561,6 +3695,10 @@ function bind(){
       }
       state[field]=list;
 
+      if(field==='ectopyPatterns'){
+        state.ectopyDecision='';
+      }
+
       if(field==='recommendationSelections'){
         state.recommendationText=buildRecommendationText(state.recommendationSelections);
       }
@@ -3588,7 +3726,7 @@ function bind(){
       if(t.dataset.field==='conclusionsText'){
         state.conclusionsEdited=true;
       }
-      if(t.dataset.field==='conductionNotes'){
+      if(t.dataset.field==='conductionNotes'||t.dataset.field==='ectopyNotes'){
         state.description=buildEcgDescription(state);
       }
       state.saved=false;
@@ -3823,6 +3961,11 @@ function bind(){
           ectopyPatterns:state.ectopyPatterns,
           ectopyMorphology:state.ectopyMorphology,
           ectopyCount:state.ectopyCount,
+          ectopyFrequency:state.ectopyFrequency,
+          ectopyPause:state.ectopyPause,
+          ectopyRonT:state.ectopyRonT,
+          ectopyNotes:state.ectopyNotes,
+          ectopyDecision:state.ectopyDecision,
           stSegment:state.stSegment,
           stDeviation:state.stDeviation,
           tWaveMorphology:state.tWaveMorphology,
