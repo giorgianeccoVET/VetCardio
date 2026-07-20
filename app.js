@@ -895,6 +895,16 @@ function bav2SubtypeLabel(value){
   })[value]||'';
 }
 
+function bav2DiagnosisPhrase(value){
+  return ({
+    mobitz1:'blocco atrioventricolare di II grado tipo Mobitz I (Wenckebach)',
+    mobitz2:'blocco atrioventricolare di II grado tipo Mobitz II',
+    two_to_one:'blocco atrioventricolare di II grado con conduzione 2:1',
+    high_grade:'blocco atrioventricolare di II grado ad alto grado',
+    unclassified:'blocco atrioventricolare di II grado non classificabile'
+  })[value]||'blocco atrioventricolare di II grado';
+}
+
 function conductionDot(state){
   if(state.conductionMode==='none') return '🟢';
   if(state.conductionMode) return '🟠';
@@ -1235,7 +1245,7 @@ function buildClinicalFindings(state,species=''){
   if(state.bav2Decision==='confirm'){
     const subtype=bav2SubtypeLabel(state.bav2Subtype);
     add('av_block_2','conduction',subtype?`BAV II grado — ${subtype}`:'BAV II grado',
-      subtype?`Blocco atrioventricolare di II grado, ${subtype}.`:'Blocco atrioventricolare di II grado.',
+      `${bav2DiagnosisPhrase(state.bav2Subtype)[0].toUpperCase()}${bav2DiagnosisPhrase(state.bav2Subtype).slice(1)}.`,
       true,{subtype:state.bav2Subtype||''});
   }else if(state.conductionMode==='advanced'){
     add('advanced_av_block','conduction','BAV avanzato','Blocco atrioventricolare avanzato.',true);
@@ -1312,7 +1322,7 @@ function buildAutomaticDiagnosis(state,species=''){
   const b2=findings.find(f=>f.code==='av_block_2');
   if(codes.has('complete_av_block')) conduction='blocco atrioventricolare completo';
   else if(codes.has('advanced_av_block')) conduction='blocco atrioventricolare avanzato';
-  else if(b2){ const sub=b2.subtype?bav2SubtypeLabel(b2.subtype):''; conduction=sub?`blocco atrioventricolare di II grado (${sub})`:'blocco atrioventricolare di II grado'; }
+  else if(b2){ conduction=bav2DiagnosisPhrase(b2.subtype||''); }
   else if(codes.has('av_block_1')) conduction='blocco atrioventricolare di I grado';
   const assoc=[];
   const ect=findings.find(f=>['ventricular_ectopy','supraventricular_ectopy','ectopy_uncertain'].includes(f.code));
@@ -2231,8 +2241,7 @@ function buildEcgInterpretation(state,species=''){
   if(wanderingSuggested(state)&&state.wanderingDecision==='confirm') parts.push('Il tracciato è compatibile con ritmo sinusale caratterizzato da pacemaker migrante.');
   if(bav1Suggested(state)&&state.bav1Decision==='confirm') parts.push('L’allungamento costante dell’intervallo PR con conduzione 1:1 è compatibile con blocco atrioventricolare di I grado.');
   if(bav2Suggested(state)&&state.bav2Decision==='confirm'){
-    const sub=bav2SubtypeLabel(state.bav2Subtype);
-    parts.push(sub?`La presenza di onde P non condotte è compatibile con blocco atrioventricolare di II grado (${sub}).`:'La presenza di onde P non condotte è compatibile con blocco atrioventricolare di II grado.');
+    parts.push(`La presenza di onde P non condotte è compatibile con ${bav2DiagnosisPhrase(state.bav2Subtype)}.`);
   }
 
   const hrInterpretation=heartRateInterpretationText(state);
